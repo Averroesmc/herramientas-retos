@@ -159,6 +159,12 @@ body.preview { background: repeating-conic-gradient(#1c1c22 0 25%, #141418 0 50%
 .toast-icon { width: 72px; height: 72px; box-shadow: 0 0 0 4px #000; }
 .toast-icon canvas { width: 72px; height: 72px; display: block; image-rendering: pixelated; }
 .toast-title { font-size: 30px; line-height: 1.05; font-weight: 600; color: #ffff55; text-shadow: 3px 3px 0 #3f3f15; }
-.toast-text { margin-top: 6px; font-size: 28px; line-height: 1.1; font-weight: 500; color: #fff; text-shadow: 3px 3px 0 #3f3f3f; }
-.toast-by { margin-top: 6px; font-size: 18px; color: #a8a8a8; text-shadow: 2px 2px 0 #2a2a2a; }
+.toast-body { min-width: 0; }
+.toast-text { margin-top: 6px; font-size: 28px; line-height: 1.25; font-weight: 500; color: #fff; text-shadow: 3px 3px 0 #3f3f3f;
+  overflow: hidden; white-space: nowrap; }
+.toast-text span { display: inline-block; padding-right: 4px; }
+/* Si no cabe: quieto 1,4 s, se desplaza hasta el final y se queda ahí. */
+.toast-text.scroll span { animation: toast-scroll var(--dur) linear 1.4s both; }
+@keyframes toast-scroll { from { transform: translateX(0); } to { transform: translateX(calc(-1 * var(--dist))); } }
+.toast-by { margin-top: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 18px; color: #a8a8a8; text-shadow: 2px 2px 0 #2a2a2a; }
 #toastFx { position: absolute; left: 54px; top: 50%; width: 0; height: 0; --ox: 0px; --oy: 0px; }

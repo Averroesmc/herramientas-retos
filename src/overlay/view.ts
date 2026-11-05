@@ -408,15 +408,30 @@ export class View {
     this.toasting = true
     const toast = $(this.stage, '#toast')
     toast.style.setProperty('--c', COLORS.twitch.c)
-    $(this.stage, '#toastText').textContent = next.text
+    // El reto va en una línea del ancho de la tarjeta; si no cabe, se desplaza despacio para leerlo entero.
+    const box = $(this.stage, '#toastText')
+    box.classList.remove('scroll')
+    box.innerHTML = ''
+    const line = document.createElement('span')
+    line.textContent = next.text
+    box.appendChild(line)
     $(this.stage, '#toastBy').textContent = `de ${next.by}`
+    const overflow = line.scrollWidth - box.clientWidth
+    let showMs = 5600
+    if (overflow > 0) {
+      const scrollS = Math.max(2, overflow / 90)
+      box.style.setProperty('--dist', `${overflow + 8}px`)
+      box.style.setProperty('--dur', `${scrollS}s`)
+      box.classList.add('scroll')
+      showMs = Math.max(showMs, 1400 + scrollS * 1000 + 1800)
+    }
     await this.drawAvatar(next.by, next.avatar)
     toast.classList.add('on')
     sfx.banner()
     setTimeout(() => sfx.chosen(), 250)
     await wait(450)
     burst($(this.stage, '#toastFx'), [COLORS.twitch.c, COLORS.twitch.l, '#ffffff', '#ffe27a'], 26, 6.2, 140)
-    await wait(5600)
+    await wait(showMs)
     toast.classList.remove('on')
     await wait(650)
     this.toasting = false
