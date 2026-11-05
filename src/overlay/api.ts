@@ -19,4 +19,7 @@ export const overlayState = (key: string, version: number) => call<Snapshot>(`/a
 export const sendEvents = (key: string, body: { events: FeedEvent[]; ballots: BallotIn[]; commands: CommandIn[]; readers: unknown }) =>
   call<Snapshot>(`/api/overlay/events${q(key)}`, { method: 'POST', body: JSON.stringify(body) })
 
-export const overlayApi = <T>(key: string, path: string, init?: RequestInit) => call<T>(`/api/overlay${path}${q(key)}`, init)
+export const overlayApi = <T>(key: string, path: string, init?: RequestInit) => {
+  const [route, extra] = path.split('?')
+  return call<T>(`/api/overlay${route}${q(key, extra ? `&${extra}` : '')}`, init)
+}

@@ -130,12 +130,17 @@ function connectTwitch(channel: string, onLine: (l: Line) => void, onSub: (s: Su
 
 /* ---------------------------------------------------------------- Kick */
 
-/** El chat público de Kick (Pusher). No es oficial: si Kick lo cambia, puede dejar de ir. */
-const KICK_WS = 'wss://ws-us2.pusher.com/app/32cbd69e4b950bf97679?protocol=7&client=js&version=8.4.0&flash=false'
+/**
+ * El chat público de Kick (Pusher). No es oficial: si Kick lo cambia, puede dejar de ir. La clave la da
+ * el servidor (la pregunta a Kick); si Kick la rechaza (error 4001), se vuelve a pedir y se reconecta.
+ */
+type KickCreds = { appKey: string; cluster: string }
+const KICK_FALLBACK: KickCreds = { appKey: '34bf7a0ff419a2a775b9', cluster: 'us2' }
+const kickUrl = (c: KickCreds) => `wss://ws-${c.cluster}.pusher.com/app/${c.appKey}?protocol=7&client=js&version=8.4.0&flash=false`
 
 type KickMessage = { id?: string; content?: string; created_at?: string; sender?: { id?: number; username?: string; slug?: string; identity?: { badges?: { type?: string }[] } } }
 
-function connectKick(chatroom: string, onLine: (l: Line) => void, onSub: (s: Sub) => void, onStatus: (s: ReaderStatus) => void) {
+function connectKick(chatroom: string, creds: KickCreds, onLine: (l: Line) => void, onSub: (s: Sub) => void, onStatus: (s: ReaderStatus) => void, onBadKey: () => void) {
   let socket: WebSocket | null = null
   let stopped = false
   let attempt = 0
@@ -143,7 +148,7 @@ function connectKick(chatroom: string, onLine: (l: Line) => void, onSub: (s: Sub
 
   const open = () => {
     onStatus('connecting')
-    const ws = new WebSocket(KICK_WS)
+    const ws = new WebSocket(kickUrl(creds))
     socket = ws
     ws.onmessage = event => {
       let msg: { event?: string; data?: string; channel?: string }
@@ -154,6 +159,12 @@ function connectKick(chatroom: string, onLine: (l: Line) => void, onSub: (s: Sub
         case 'pusher:connection_established':
           ws.send(JSON.stringify({ event: 'pusher:subscribe', data: { auth: '', channel: `chatrooms.${chatroom}.v2` } }))
           break
+        case 'pusher:error': {
+          // 4001: la clave ya no vale (Kick la ha cambiado). Se deja de reintentar con esta y se pide otra.
+          const code = Number((data as { code?: number }).code)
+          if (code >= 4000 && code < 4100) { stopped = true; onStatus('error'); onBadKey(); ws.close() }
+          break
+        }
         case 'pusher:ping':
           ws.send(JSON.stringify({ event: 'pusher:pong', data: {} }))
           break
@@ -230,8 +241,9 @@ export class ChatReader {
   private readonly lock = new AbortController()
   private readonly started = Date.now()
   private twitch: { channel: string; stop: () => void } | null = null
-  private kick: { room: string; stop: () => void } | null = null
+  private kick: { room: string; key: string; stop: () => void } | null = null
   private kickLookup = { slug: '', at: 0, running: false }
+  private kickBadKey = false
   private youtube: { channel: string; abort: AbortController } | null = null
   private status: Status = { twitch: 'off', youtube: 'off', kick: 'off', note: '' }
   private notes: Record<Platform, string> = { twitch: '', youtube: '', kick: '' }
@@ -313,7 +325,10 @@ export class ChatReader {
     if (!this.kick && this.kickLookup.slug === slug + (config?.kickChatroom ?? '') && Date.now() - this.kickLookup.at < 60_000) return
     this.kickLookup = { slug: slug + (config?.kickChatroom ?? ''), at: Date.now(), running: true }
     try {
-      const info = await overlayApi<{ slug: string; chatroomId: string | null }>(this.key, '/kick')
+      const fresh = this.kickBadKey
+      this.kickBadKey = false
+      const info = await overlayApi<{ slug: string; chatroomId: string | null; appKey?: string; cluster?: string }>(this.key, fresh ? '/kick?fresh=1' : '/kick')
+      const creds: KickCreds = info?.appKey && info.cluster ? { appKey: info.appKey, cluster: info.cluster } : KICK_FALLBACK
       let room = info?.chatroomId ?? null
       if (!room && info?.slug) {
         // Desde el ordenador del streamer Kick a veces sí contesta.
@@ -322,9 +337,19 @@ export class ChatReader {
           .then((d: { chatroom?: { id?: number } } | null) => (d?.chatroom?.id ? String(d.chatroom.id) : null))
           .catch(() => null)
       }
-      if (this.kick && this.kick.room !== room) { this.kick.stop(); this.kick = null }
+      if (this.kick && (this.kick.room !== room || this.kick.key !== creds.appKey)) { this.kick.stop(); this.kick = null }
       if (!room) { this.setStatus('kick', 'error', 'Kick: no se encuentra el chat. Pon su número en el panel.'); return }
-      if (!this.kick) this.kick = { room, stop: connectKick(room, l => this.take(l), s => this.take_sub(s), s => this.setStatus('kick', s, '')) }
+      if (!this.kick) {
+        const onBadKey = () => {
+          // Kick ha rechazado la clave: en la siguiente vuelta se pide otra al servidor y se reconecta.
+          this.kick = null
+          this.kickBadKey = true
+          this.kickLookup.at = 0
+          this.kickLookup.slug = ''
+          this.setStatus('kick', 'error', 'Kick: ha cambiado la clave de su chat, buscando la nueva…')
+        }
+        this.kick = { room, key: creds.appKey, stop: connectKick(room, creds, l => this.take(l), s => this.take_sub(s), s => this.setStatus('kick', s, ''), onBadKey) }
+      }
     } finally {
       this.kickLookup.running = false
     }

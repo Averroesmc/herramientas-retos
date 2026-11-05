@@ -177,6 +177,35 @@ async function kickChatroom(slug: string): Promise<string | null> {
   return id
 }
 
+/**
+ * La clave del chat de Kick (Pusher). Kick la cambia de vez en cuando (en octubre de 2026 dejó de valer
+ * 32cbd69e…), así que se le pregunta la actual, como hace su propia web, y se guarda 10 minutos.
+ * Si no contesta, la última conocida.
+ */
+const KICK_FALLBACK = { appKey: '34bf7a0ff419a2a775b9', cluster: 'us2' }
+let kickKey: { appKey: string; cluster: string; at: number } | null = null
+
+async function kickCredentials(fresh: boolean) {
+  if (!fresh && kickKey && Date.now() - kickKey.at < 10 * 60_000) return kickKey
+  try {
+    const res = await fetch('https://web.kick.com/api/v1/realtime/connection', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ client: { id: crypto.randomUUID(), type: 'web' }, capabilities: { accepted_providers: [{ provider: 'pusher' }] } }),
+      signal: AbortSignal.timeout(8000),
+    })
+    if (res.ok) {
+      const body = await res.json<{ data?: { connections?: { provider?: string; credentials?: { app_key?: string; cluster?: string } }[] } }>()
+      const found = body.data?.connections?.find(c => c.provider === 'pusher' && c.credentials?.app_key && c.credentials.cluster)
+      if (found && /^[\w-]{8,64}$/.test(found.credentials!.app_key!) && /^[a-z0-9-]{2,20}$/.test(found.credentials!.cluster!)) {
+        kickKey = { appKey: found.credentials!.app_key!, cluster: found.credentials!.cluster!, at: Date.now() }
+        return kickKey
+      }
+    }
+  } catch { /* sin respuesta: la última conocida */ }
+  return kickKey ?? { ...KICK_FALLBACK, at: 0 }
+}
+
 async function overlay(request: Request, env: Env, pathname: string) {
   const url = new URL(request.url)
   const key = url.searchParams.get('key') ?? ''
@@ -235,7 +264,8 @@ async function overlay(request: Request, env: Env, pathname: string) {
   if (pathname === '/api/overlay/kick' && request.method === 'GET') {
     const slug = config.channels.kick.replace(/^https?:\/\/(www\.)?kick\.com\//i, '').replace(/[/?#].*$/, '').trim()
     if (!slug) return json({ slug: '', chatroomId: null })
-    return json({ slug, chatroomId: config.kickChatroom || (await kickChatroom(slug)) })
+    const { appKey, cluster } = await kickCredentials(url.searchParams.has('fresh'))
+    return json({ slug, chatroomId: config.kickChatroom || (await kickChatroom(slug)), appKey, cluster })
   }
   return json({ error: 'no encontrado' }, 404)
 }
