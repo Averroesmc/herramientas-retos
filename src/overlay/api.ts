@@ -1,5 +1,5 @@
 /** Las llamadas del overlay de OBS al servidor (worker/index.ts, /api/overlay…). */
-import type { BallotIn, CommandIn, FeedEvent, OverlayConfig, StateView } from '../../shared/logic'
+import type { BallotIn, CommandIn, FeedEvent, OverlayConfig, RedemptionIn, StateView } from '../../shared/logic'
 
 export type Snapshot = { config: OverlayConfig; state: StateView; version: number; now: number }
 
@@ -16,7 +16,7 @@ const q = (key: string, extra = '') => `?key=${encodeURIComponent(key)}${extra}`
 /** El estado, o null si no ha cambiado desde `version`. */
 export const overlayState = (key: string, version: number) => call<Snapshot>(`/api/overlay${q(key, `&v=${version}`)}`)
 
-export const sendEvents = (key: string, body: { events: FeedEvent[]; ballots: BallotIn[]; commands: CommandIn[]; readers: unknown }) =>
+export const sendEvents = (key: string, body: { events: FeedEvent[]; ballots: BallotIn[]; commands: CommandIn[]; redemptions: RedemptionIn[]; readers: unknown }) =>
   call<Snapshot>(`/api/overlay/events${q(key)}`, { method: 'POST', body: JSON.stringify(body) })
 
 export const overlayApi = <T>(key: string, path: string, init?: RequestInit) => {

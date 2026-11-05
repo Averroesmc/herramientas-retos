@@ -21,7 +21,8 @@ export type Style = 'potions' | 'banner'
 export type Mode = 'winner' | 'all' | 'roulette'
 export type ReaderStatus = 'off' | 'connecting' | 'ok' | 'error'
 
-export interface Challenge { id: string; text: string; diff: Difficulty; on: boolean }
+/** `by`: quién lo pidió, si llegó por puntos del canal de Twitch. */
+export interface Challenge { id: string; text: string; diff: Difficulty; on: boolean; by?: string }
 
 export interface Config {
   style: Style
@@ -42,6 +43,11 @@ export interface Config {
   sound: boolean
   volume: number
   subSound: boolean
+  /**
+   * La recompensa de puntos del canal de Twitch que añade retos a la lista (su id; vacío = apagado).
+   * Tiene que pedir texto al espectador: ese texto es el reto. `diff`, la dificultad con la que entran.
+   */
+  reward: { id: string; diff: Difficulty }
   /** Dónde está la cámara en la escena de 1920×1080: las pociones asoman por encima. */
   camera: { x: number; y: number; w: number }
   challenges: Challenge[]
@@ -85,7 +91,13 @@ export interface State {
   seen: string[]
   lastActivity: number
   readers: Readers
+  /** Esperando a que alguien canjee la recompensa para enlazarla (botón «Detectar» del panel). */
+  rewardLearn: boolean
+  /** Los últimos retos añadidos con puntos del canal: el overlay los anuncia. */
+  added: AddedChallenge[]
 }
+
+export interface AddedChallenge { id: string; text: string; by: string; at: number; avatar?: string }
 
 /* ---------------------------------------------------------------- tiempos */
 
@@ -173,6 +185,7 @@ export function defaultConfig(): Config {
     volume: 70,
     subSound: true,
     camera: { x: 25, y: 503, w: 424 },
+    reward: { id: '', diff: 2 },
     challenges: defaultChallenges(),
   }
 }
@@ -188,6 +201,8 @@ export function initialState(now = Date.now()): State {
     seen: [],
     lastActivity: now,
     readers: { twitch: 'off', youtube: 'off', kick: 'off', note: '', at: 0 },
+    rewardLearn: false,
+    added: [],
   }
 }
 
@@ -218,7 +233,8 @@ export function sanitizeChallenges(raw: unknown, base: Challenge[]): Challenge[]
     if (!id || seen.has(id)) id = `c${Math.random().toString(36).slice(2, 10)}`
     seen.add(id)
     const diff = clamp(c.diff, 1, 3, 2) as Difficulty
-    out.push({ id, text, diff, on: bool(c.on, true) })
+    const by = str(c.by, 40)
+    out.push({ id, text, diff, on: bool(c.on, true), ...(by ? { by } : {}) })
   }
   return out
 }
@@ -227,6 +243,7 @@ export function sanitizeChallenges(raw: unknown, base: Challenge[]): Challenge[]
 export function sanitizeConfig(raw: unknown, base: Config = defaultConfig()): Config {
   const o = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
   const cam = o.camera && typeof o.camera === 'object' ? (o.camera as Record<string, unknown>) : {}
+  const reward = o.reward && typeof o.reward === 'object' ? (o.reward as Record<string, unknown>) : {}
   return {
     style: o.style === 'potions' || o.style === 'banner' ? o.style : base.style,
     goals: perPlatform(o.goals, base.goals, (v, b) => clamp(v, 1, 9999, b)),
@@ -247,9 +264,16 @@ export function sanitizeConfig(raw: unknown, base: Config = defaultConfig()): Co
       y: clamp(cam.y, 0, 1080, base.camera.y),
       w: clamp(cam.w, 200, 1920, base.camera.w),
     },
+    reward: {
+      id: typeof reward.id === 'string' ? (REWARD_ID.test(reward.id.trim()) ? reward.id.trim().toLowerCase() : '') : base.reward.id,
+      diff: clamp(reward.diff, 1, 3, base.reward.diff) as Difficulty,
+    },
     challenges: o.challenges === undefined ? base.challenges : sanitizeChallenges(o.challenges, base.challenges),
   }
 }
+
+/** El id de una recompensa de Twitch (un UUID). */
+export const REWARD_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export function parseConfig(text: string | null | undefined): Config {
   try { return sanitizeConfig(JSON.parse(text ?? '{}')) } catch { return defaultConfig() }
@@ -407,6 +431,47 @@ export function applyBallots(state: State, ballots: BallotIn[], now: number): bo
 
 export interface CommandIn { p: Platform; name: string; ok: boolean }
 
+/** `login` (usuario de Twitch) y `avatar` (su foto, la busca el servidor) son para el aviso del overlay. */
+export interface RedemptionIn { id: string; reward: string; name: string; text: string; login?: string; avatar?: string }
+
+/** Solo fotos del CDN de Twitch. */
+export const AVATAR_URL = /^https:\/\/static-cdn\.jtvnw\.net\/[\w./%-]{1,300}$/
+
+const ADDED_MAX = 10
+const CHALLENGES_MAX = 300
+
+/**
+ * Un canje de puntos del canal de Twitch con texto. Si se está detectando la recompensa, se enlaza
+ * esta. Si es la recompensa enlazada, su texto entra en la lista de retos (y el overlay lo anuncia).
+ */
+export function applyRedemption(state: State, config: Config, r: RedemptionIn, now: number): boolean {
+  const reward = str(r?.reward, 40).toLowerCase()
+  if (!REWARD_ID.test(reward) || typeof r.id !== 'string') return false
+  let changed = false
+  if (state.rewardLearn) {
+    config.reward = { ...config.reward, id: reward }
+    state.rewardLearn = false
+    changed = true
+  }
+  if (reward !== config.reward.id) return changed
+  const id = `r-${r.id.slice(0, 60)}`
+  if (state.seen.includes(id)) return changed
+  state.seen.push(id)
+  if (state.seen.length > SEEN_MAX) state.seen = state.seen.slice(-SEEN_MAX)
+  const text = str(r.text, 120).replace(/\s+/g, ' ')
+  const by = str(r.name, 40) || 'Twitch'
+  if (!text || config.challenges.length >= CHALLENGES_MAX) return true
+  // Si ya está en la lista (mismo texto), no se repite: solo se vuelve a encender.
+  const same = config.challenges.find(c => c.text.toLowerCase() === text.toLowerCase())
+  if (same) same.on = true
+  else config.challenges.push({ id: `c${Math.floor(now).toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`, text, diff: config.reward.diff, on: true, by })
+  const avatar = typeof r.avatar === 'string' && AVATAR_URL.test(r.avatar) ? r.avatar : undefined
+  state.added.push({ id, text, by, at: now, ...(avatar ? { avatar } : {}) })
+  state.added = state.added.slice(-ADDED_MAX)
+  state.lastActivity = now
+  return true
+}
+
 /** !completado o !fallado de un moderador: solo cuenta el primero y solo con el reto en marcha. */
 export function applyCommand(state: State, config: Config, cmd: CommandIn, now: number): boolean {
   const round = state.round
@@ -443,6 +508,7 @@ export type PanelOp =
   | { type: 'test'; p: Platform }
   | { type: 'newStream' }
   | { type: 'resetCounts' }
+  | { type: 'learnReward'; on: boolean }
 
 export function applyPanelOp(state: State, config: Config, op: PanelOp, name: string, now: number, random: Random = Math.random): boolean {
   const round = state.round
@@ -489,6 +555,10 @@ export function applyPanelOp(state: State, config: Config, op: PanelOp, name: st
       state.done = []
       state.history = []
       state.lastActivity = now
+      return true
+    }
+    case 'learnReward': {
+      state.rewardLearn = !!op.on
       return true
     }
     case 'resetCounts': {

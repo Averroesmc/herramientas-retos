@@ -248,6 +248,8 @@ const STAGE = `
     </div>
     <div class="verdict sh" id="verdict"></div>
   </div>
+  <div id="toast"><div class="toast-icon"><canvas id="toastPic" width="24" height="24"></canvas></div>
+    <div class="toast-body"><div class="toast-title">¡Nuevo reto!</div><div class="toast-text" id="toastText"></div><div class="toast-by" id="toastBy"></div></div><div id="toastFx"></div></div>
   <div id="flash"></div>`
 
 type Flags = { late: boolean; intro: boolean; busy: boolean; card: boolean; reveal: boolean; mini: boolean; result: boolean; timeUp: boolean; lastSec: number; lastVoteSec: number }
@@ -259,6 +261,9 @@ export class View {
   private readonly potions = {} as Record<Platform, Potion>
   private order: Platform[] = [...PLATFORMS]
   private readonly seenFeed = new Set<string>()
+  private readonly seenAdded = new Set<string>()
+  private readonly toasts: { text: string; by: string; avatar?: string }[] = []
+  private toasting = false
   private first = true
   private roundId: string | null = null
   private flags = freshFlags(true)
@@ -358,8 +363,64 @@ export class View {
       }
       if (config.subSound) sfx.drop()
     }
+    // Retos nuevos por puntos del canal: se anuncian uno detrás de otro.
+    for (const a of state.added ?? []) {
+      if (this.seenAdded.has(a.id)) continue
+      this.seenAdded.add(a.id)
+      if (this.first || this.now() - a.at > 30_000) continue
+      this.toasts.push({ text: a.text, by: a.by, ...(a.avatar ? { avatar: a.avatar } : {}) })
+    }
+    void this.nextToast()
+
     this.first = false
     this.tick()
+  }
+
+  /** La foto de quien lo pide, pixelada a 24×24 (o su inicial si no hay foto). */
+  private async drawAvatar(name: string, url?: string) {
+    const cv = $<HTMLCanvasElement>(this.stage, '#toastPic')
+    const c = cv.getContext('2d')!
+    c.imageSmoothingEnabled = true
+    c.clearRect(0, 0, 24, 24)
+    const img = url ? await new Promise<HTMLImageElement | null>(resolve => {
+      const i = new Image()
+      i.onload = () => resolve(i)
+      i.onerror = () => resolve(null)
+      setTimeout(() => resolve(null), 2500)
+      i.src = url
+    }) : null
+    if (img) { c.drawImage(img, 0, 0, 24, 24); return }
+    let hash = 0
+    for (const ch of name) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
+    c.fillStyle = ['#7a5af8', '#e0761e', '#1f9d6b', '#d92b6b', '#2e7de0', '#c2410c'][hash % 6]!
+    c.fillRect(0, 0, 24, 24)
+    c.fillStyle = '#fff'
+    c.font = 'bold 16px "Pixelify Sans", monospace'
+    c.textAlign = 'center'
+    c.textBaseline = 'middle'
+    c.fillText((name[0] ?? '?').toUpperCase(), 12, 13)
+  }
+
+  private async nextToast() {
+    if (this.toasting) return
+    const next = this.toasts.shift()
+    if (!next) return
+    this.toasting = true
+    const toast = $(this.stage, '#toast')
+    toast.style.setProperty('--c', COLORS.twitch.c)
+    $(this.stage, '#toastText').textContent = next.text
+    $(this.stage, '#toastBy').textContent = `de ${next.by}`
+    await this.drawAvatar(next.by, next.avatar)
+    toast.classList.add('on')
+    sfx.banner()
+    setTimeout(() => sfx.chosen(), 250)
+    await wait(450)
+    burst($(this.stage, '#toastFx'), [COLORS.twitch.c, COLORS.twitch.l, '#ffffff', '#ffe27a'], 26, 6.2, 140)
+    await wait(5600)
+    toast.classList.remove('on')
+    await wait(650)
+    this.toasting = false
+    void this.nextToast()
   }
 
   private renderHearts(potion: Potion, frac: number, goal: number) {

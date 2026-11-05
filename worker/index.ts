@@ -16,7 +16,7 @@ import { cachedLiveVideo, pollChat, startChat, type ChatSession } from './youtub
 import {
   advance, applyBallots, applyCommand, applyEvent, applyPanelOp, applyReaders, defaultConfig, initialState,
   overlayConfig, parseConfig, parseState, sanitizeConfig, viewOf,
-  type BallotIn, type CommandIn, type Config, type FeedEvent, type PanelOp, type State,
+  applyRedemption, AVATAR_URL, type BallotIn, type CommandIn, type Config, type FeedEvent, type PanelOp, type RedemptionIn, type State,
 } from '../shared/logic.ts'
 
 interface Env {
@@ -156,7 +156,33 @@ async function panel(request: Request, env: Env, pathname: string) {
 
 const overlayView = (l: Loaded & { now: number }) => ({ config: overlayConfig(l.config), state: viewOf(l.state), version: l.version, now: l.now })
 
-type EventsBody = { events?: FeedEvent[]; ballots?: BallotIn[]; commands?: CommandIn[]; readers?: unknown }
+type EventsBody = { events?: FeedEvent[]; ballots?: BallotIn[]; commands?: CommandIn[]; redemptions?: RedemptionIn[]; readers?: unknown }
+
+/**
+ * La foto de perfil de alguien de Twitch, para el aviso de «¡Nuevo reto!». El chat no la trae y la API
+ * de Twitch pide cuenta, así que se pregunta a decapi.me (y si falla, a unavatar.io). Se guarda una hora.
+ */
+const avatarCache = new Map<string, { url: string | null; at: number }>()
+async function twitchAvatar(login: string): Promise<string | null> {
+  const hit = avatarCache.get(login)
+  if (hit && Date.now() - hit.at < 3600_000) return hit.url
+  let url: string | null = null
+  try {
+    const res = await fetch(`https://decapi.me/twitch/avatar/${login}`, { signal: AbortSignal.timeout(4000) })
+    const text = (await res.text()).trim()
+    if (res.ok && AVATAR_URL.test(text)) url = text
+  } catch { /* sin respuesta */ }
+  if (!url) {
+    try {
+      const res = await fetch(`https://unavatar.io/twitch/${login}?json`, { signal: AbortSignal.timeout(4000) })
+      const body = await res.json<{ url?: string }>()
+      if (res.ok && body.url && AVATAR_URL.test(body.url)) url = body.url
+    } catch { /* sin respuesta */ }
+  }
+  avatarCache.set(login, { url, at: Date.now() })
+  if (avatarCache.size > 500) avatarCache.delete(avatarCache.keys().next().value!)
+  return url
+}
 
 const kickCache = new Map<string, { id: string | null; at: number }>()
 
@@ -225,6 +251,13 @@ async function overlay(request: Request, env: Env, pathname: string) {
     const events = Array.isArray(body.events) ? body.events.slice(0, 200) : []
     const ballots = Array.isArray(body.ballots) ? body.ballots.slice(0, 2000) : []
     const commands = Array.isArray(body.commands) ? body.commands.slice(0, 20) : []
+    const redemptions = Array.isArray(body.redemptions) ? body.redemptions.slice(0, 20) : []
+    // La foto de quien canjea, antes de guardar (fuera del bucle de reintentos).
+    await Promise.all(redemptions.map(async r => {
+      if (!r || typeof r !== 'object') return
+      const login = typeof r.login === 'string' ? r.login.toLowerCase() : ''
+      r.avatar = /^[a-z0-9_]{2,25}$/.test(login) ? (await twitchAvatar(login)) ?? undefined : undefined
+    }))
     const l = await mutate(env.DB, where, (l, now) => {
       let changed = false
       for (const ev of events) {
@@ -233,6 +266,7 @@ async function overlay(request: Request, env: Env, pathname: string) {
       }
       changed = applyBallots(l.state, ballots, now) || changed
       for (const cmd of commands) changed = applyCommand(l.state, l.config, cmd, now) || changed
+      for (const r of redemptions) changed = applyRedemption(l.state, l.config, r, now) || changed
       if (body.readers) changed = applyReaders(l.state, body.readers, now) || changed
       return advance(l.state, l.config, now, random) || changed
     })

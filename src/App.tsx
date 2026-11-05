@@ -106,7 +106,7 @@ export default function App() {
                 <HistoryPanel data={data} ops={ops} />
               </div>
               <div className="column">
-                <SettingsPanel data={data} patch={patch} />
+                <SettingsPanel data={data} patch={patch} ops={ops} />
                 <ChallengesPanel data={data} patch={patch} ops={ops} />
               </div>
             </div>

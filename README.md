@@ -20,6 +20,8 @@
   - Kick: subs y regaladas.
   - Las renovaciones se pueden desactivar.
 
+- **Retos con puntos del canal (Twitch)**: en la configuración se enlaza una recompensa («Detectar recompensa» y canjearla una vez, o pegando su ID). Cada canje añade su texto a la lista de retos, con el nombre de quien lo pidió, y en el overlay sale arriba a la derecha un aviso «¡Nuevo reto!» con su foto pixelada. La recompensa tiene que pedir texto al espectador: los canjes sin texto no llegan al chat. La foto se busca en decapi.me (o unavatar.io), porque el chat no la trae.
+
 Los chats los lee el propio overlay de OBS: con varias fuentes abiertas, solo lee una.
 
 - **Twitch** se lee como invitado, sin cuenta.

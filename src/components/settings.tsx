@@ -5,7 +5,7 @@ import { Input } from '@/components/arc/input/input'
 import SegmentedControl from '@/components/arc/segmented-control/segmented-control'
 import type { PanelData } from '@/lib/api'
 import {
-  defaultChallenges, DIFFICULTY_NAME, PLATFORMS, PLATFORM_NAME,
+  defaultChallenges, DIFFICULTY_NAME, PLATFORMS, PLATFORM_NAME, REWARD_ID,
   type Challenge, type Config, type Difficulty, type Mode, type PanelOp, type Platform, type Style,
 } from '../../shared/logic'
 
@@ -51,7 +51,7 @@ const CHANNEL_HINT: Record<Platform, { label: string; placeholder: string }> = {
   kick: { label: 'Canal de Kick', placeholder: 'nombre del canal' },
 }
 
-export function SettingsPanel({ data, patch }: { data: PanelData; patch: Patch }) {
+export function SettingsPanel({ data, patch, ops }: { data: PanelData; patch: Patch; ops: (...o: PanelOp[]) => Promise<void> }) {
   const c = data.config
   const per = <K extends 'goals' | 'enabled' | 'channels' | 'modCommands'>(key: K, p: Platform, value: Config[K][Platform]) =>
     patch({ [key]: { ...c[key], [p]: value } } as Partial<Config>)
@@ -107,6 +107,30 @@ export function SettingsPanel({ data, patch }: { data: PanelData; patch: Patch }
         <div className="switch-grid">
           {PLATFORMS.map(p => <Switch key={p} label={`En ${PLATFORM_NAME[p]}`} checked={c.modCommands[p]} onChange={v => per('modCommands', p, v)} />)}
         </div>
+      </div>
+
+      <div className="group">
+        <h3 className="group__title">Retos con puntos del canal (Twitch)</h3>
+        <p className="hint-text">Quien canjee esta recompensa añade un reto a la lista, y en el overlay sale «¡Nuevo reto!». En Twitch la recompensa tiene que tener activado <b>«El espectador debe escribir texto»</b>: ese texto es el reto.</p>
+        <div className="reward-row">
+          <span className={`tag${c.reward.id ? ' tag--ok' : ''}`}>{c.reward.id ? 'Recompensa enlazada' : 'Sin recompensa'}</span>
+          {data.state.rewardLearn
+            ? <Button variant="secondary" size="sm" onClick={() => ops({ type: 'learnReward', on: false })}>Cancelar</Button>
+            : <Button variant="secondary" size="sm" onClick={() => ops({ type: 'learnReward', on: true })}>{c.reward.id ? 'Cambiar recompensa' : 'Detectar recompensa'}</Button>}
+          {c.reward.id && !data.state.rewardLearn && <Button variant="ghost" size="sm" onClick={() => patch({ reward: { ...c.reward, id: '' } })}>Quitar</Button>}
+        </div>
+        {data.state.rewardLearn && <p className="hint-text"><b>Esperando un canje…</b> Canjea la recompensa una vez en tu canal (con el overlay abierto en OBS) y quedará enlazada. Ese canje ya cuenta como reto.</p>}
+        <div className="fields">
+          <TextField label="ID de la recompensa (opcional)" placeholder="se rellena solo al detectarla" value={c.reward.id}
+            onCommit={v => { if (!v || REWARD_ID.test(v)) patch({ reward: { ...c.reward, id: v.toLowerCase() } }) }} />
+          <label className="select-field">
+            <span>Dificultad de los retos que lleguen</span>
+            <select className={`diff-select d${c.reward.diff}`} value={c.reward.diff} onChange={e => patch({ reward: { ...c.reward, diff: Number(e.target.value) as Difficulty } })}>
+              {([1, 2, 3] as Difficulty[]).map(d => <option key={d} value={d}>{DIFFICULTY_NAME[d]}</option>)}
+            </select>
+          </label>
+        </div>
+        {!c.enabled.twitch && <p className="hint-text">Twitch está apagado arriba: actívalo y pon el canal para leer los canjes.</p>}
       </div>
 
       <div className="group">
@@ -177,6 +201,7 @@ export function ChallengesPanel({ data, patch, ops }: { data: PanelData; patch: 
               {([1, 2, 3] as Difficulty[]).map(d => <option key={d} value={d}>{DIFFICULTY_NAME[d]}</option>)}
             </select>
             {done.has(c.id) && <span className="tag tag--ok">Hecho hoy</span>}
+            {c.by && !done.has(c.id) && <span className="tag tag--by" title={`Lo pidió ${c.by} con puntos del canal`}>{c.by}</span>}
             <button type="button" className="icon-button icon-button--sm" onClick={() => set(list.filter(x => x.id !== c.id))} aria-label="Borrar reto" title="Borrar"><Trash2 size={15} /></button>
           </li>
         ))}

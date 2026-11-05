@@ -15,11 +15,11 @@ import { overlayApi, sendEvents, type Snapshot } from './api'
 import { findLiveChat, streamChat, YouTubeApiError, type ChatResponse, type LiveChat } from './youtube-api'
 import {
   GRACE_MS, parseCommand, parseVote, phaseOf,
-  type BallotIn, type CommandIn, type FeedEvent, type Platform, type ReaderStatus,
+  type BallotIn, type CommandIn, type FeedEvent, type Platform, type ReaderStatus, type RedemptionIn,
 } from '../../shared/logic'
 
-/** Un mensaje normal de cualquier chat. */
-type Line = { id: string; k: string; p: Platform; name: string; text: string; at: number; mod: boolean }
+/** Un mensaje normal de cualquier chat. `reward`: si es un canje de puntos del canal de Twitch con texto, su recompensa. */
+type Line = { id: string; k: string; p: Platform; name: string; text: string; at: number; mod: boolean; reward?: string; login?: string }
 /** Una sub o un regalo leído del chat. */
 type Sub = { id: string; p: Platform; name: string; n: number; at: number; gift: boolean; renewal: boolean }
 
@@ -105,7 +105,9 @@ function connectTwitch(channel: string, onLine: (l: Line) => void, onSub: (s: Su
         }
         if (msg.command !== 'PRIVMSG') continue
         const badges = msg.tags.badges ?? ''
+        const reward = msg.tags['custom-reward-id']
         onLine({
+          ...(reward ? { reward, login } : {}),
           id: `t-${msg.tags.id || `${login}-${at}`}`,
           k: `t:${msg.tags['user-id'] || login}`,
           p: 'twitch',
@@ -255,6 +257,7 @@ export class ChatReader {
   private ballots = new Map<string, BallotIn>()
   private ballotsRound = ''
   private commands: CommandIn[] = []
+  private redemptions: RedemptionIn[] = []
   private sending = false
   private readonly timers: ReturnType<typeof setInterval>[] = []
 
@@ -403,6 +406,13 @@ export class ChatReader {
   /** Un mensaje: puede ser un voto o un comando de moderador. */
   private take(line: Line) {
     const snap = this.snap
+    // Un canje de puntos del canal: si es la recompensa de los retos (o se está detectando), al servidor.
+    if (line.reward) {
+      if (snap && line.text && (snap.state.rewardLearn || line.reward.toLowerCase() === snap.config.reward.id)) {
+        this.redemptions.push({ id: line.id, reward: line.reward, name: line.name, text: line.text, ...(line.login ? { login: line.login } : {}) })
+      }
+      return
+    }
     const round = snap?.state.round
     if (!snap || !round || !line.text) return
     const now = this.now()
@@ -426,17 +436,19 @@ export class ChatReader {
     if (this.sending) return
     const round = this.snap?.state.round
     if (this.ballotsRound && round?.id !== this.ballotsRound) { this.ballots.clear(); this.ballotsRound = '' }
-    if (!this.events.length && !this.ballots.size && !this.commands.length && !this.pendingReport) return
+    if (!this.events.length && !this.ballots.size && !this.commands.length && !this.redemptions.length && !this.pendingReport) return
     this.sending = true
     const events = this.events.slice()
     const ballots = [...this.ballots.values()]
     const commands = this.commands.slice()
+    const redemptions = this.redemptions.slice()
     const readers = this.pendingReport
     try {
-      const snap = await sendEvents(this.key, { events, ballots, commands, readers })
+      const snap = await sendEvents(this.key, { events, ballots, commands, redemptions, readers })
       this.events = this.events.filter(e => !events.includes(e))
       for (const b of ballots) if (this.ballots.get(b.k) === b) this.ballots.delete(b.k)
       this.commands = this.commands.filter(c => !commands.includes(c))
+      this.redemptions = this.redemptions.filter(r => !redemptions.includes(r))
       if (this.pendingReport === readers) this.pendingReport = null
       if (snap) this.onSnapshot(snap)
     } catch {

@@ -443,7 +443,7 @@ a.brand { color: inherit; text-decoration: none; }
 
 /* Lista de retos */
 .challenges { display: grid; gap: 6px; max-height: 560px; overflow: auto; margin: 0; padding: 0 4px 0 0; list-style: none; }
-.challenges li, .add-challenge { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; align-items: center; gap: var(--space-2); }
+.challenges li, .add-challenge { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto auto; align-items: center; gap: var(--space-2); }
 .challenges li.is-off .challenge-text { color: var(--text-muted); }
 .challenges li.is-done .challenge-text { text-decoration: line-through; color: var(--text-muted); }
 .challenges li:not(.is-done) .tag--ok { display: none; }
@@ -457,3 +457,8 @@ a.brand { color: inherit; text-decoration: none; }
 .diff-select.d2 { color: oklch(62% .15 65); }
 .diff-select.d3 { color: var(--danger); }
 .icon-button--sm { width: 32px; height: 32px; }
+
+.reward-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.select-field { display: grid; gap: 6px; align-content: start; font-size: var(--text-sm); font-weight: 700; }
+.select-field .diff-select { height: 40px; justify-self: start; padding: 0 12px; }
+.tag--by { max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--tw-soft); color: var(--tw); }
