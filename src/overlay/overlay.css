@@ -4,10 +4,14 @@
 html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
 body.preview { background: repeating-conic-gradient(#1c1c22 0 25%, #141418 0 50%) 0 0 / 48px 48px; }
 #stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; color: #fff;
-  font-family: 'Jersey 10', ui-monospace, monospace; --fz: 1.3; font-synthesis: none; }
+  font-family: 'Jersey 10', ui-monospace, monospace; --fz: 1.3; font-synthesis: none;
+  /* Espacio entre los números de los contadores: Jersey 10 los trae muy juntos y el contorno negro tapa el hueco. */
+  --nums: .14em; }
 /* La tipografía (se elige en el panel). Jersey 10 y VT323 son más pequeñas a igual tamaño: --fz las iguala. */
-#stage[data-font="pixelify"] { font-family: 'Pixelify Sans', ui-monospace, monospace; --fz: 1; font-synthesis: initial; }
-#stage[data-font="vt323"] { font-family: 'VT323', ui-monospace, monospace; --fz: 1.35; }
+#stage[data-font="pixelify"] { font-family: 'Pixelify Sans', ui-monospace, monospace; --fz: 1; --nums: 0; font-synthesis: initial; }
+#stage[data-font="vt323"] { font-family: 'VT323', ui-monospace, monospace; --fz: 1.35; --nums: .06em; }
+.brow .bc, .hrow .hc, .opt .c, .timer, .pop { letter-spacing: var(--nums); }
+.brow .bc small, .hrow .hc small { margin-left: calc(var(--nums) / 2); }
 .hidden { display: none !important; }
 
 /* Texto legible encima del juego: contorno negro / sombra desplazada en píxeles */
