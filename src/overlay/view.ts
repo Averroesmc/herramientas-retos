@@ -18,6 +18,8 @@ const COLORS: Record<Platform, { c: string; l: string; d: string }> = {
 }
 const UNIT: Record<Platform, string> = { twitch: 'subs', youtube: 'miembros', kick: 'subs' }
 const NAME = (p: Platform) => PLATFORM_NAME[p].toUpperCase()
+/** Pociones: tras este tiempo sin subs se esconden detrás de la cámara. */
+const SLEEP_MS = 60_000
 
 const $ = <T extends HTMLElement = HTMLElement>(root: ParentNode, sel: string) => root.querySelector(sel) as T
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms))
@@ -269,6 +271,11 @@ export class View {
   private flags = freshFlags(true)
   private heroP: Potion | null = null
   private bannerTimer: ReturnType<typeof setTimeout> | undefined
+  /** La última vez (hora del servidor) que pasó algo con las pociones: una sub, una poción que sube o un reto. */
+  private wakeAt = 0
+  private lastCounts: Record<Platform, number> | null = null
+  /** Hora local en la que las pociones empezaron a salir de detrás de la cámara. */
+  private wokeAt = 0
   private readonly heroCtx: CanvasRenderingContext2D
 
   private readonly stage: HTMLElement
@@ -307,6 +314,7 @@ export class View {
     this.stage.style.setProperty('--cx', `${config.camera.x}px`)
     this.stage.style.setProperty('--cy', `${config.camera.y}px`)
     this.stage.style.setProperty('--cw', `${config.camera.w}px`)
+    this.stage.dataset.font = config.font
     $(this.stage, '#potionsWrap').classList.toggle('hidden', this.banner)
     if (!this.banner) $(this.stage, '#banner').classList.remove('on')
 
@@ -345,6 +353,13 @@ export class View {
       this.potions[p].row.style.setProperty('--o', String(i))
       this.potions[p].row.classList.toggle('first', i === 0 && this.potions[p].target > 0)
     })
+
+    // Despiertan las pociones: la última sub (también las de antes de abrir el overlay), una poción
+    // que sube (los botones del panel) o un reto nuevo.
+    for (const ev of state.feed) if (config.enabled[ev.p]) this.wakeAt = Math.max(this.wakeAt, ev.at)
+    if (this.lastCounts && PLATFORMS.some(p => config.enabled[p] && state.counts[p] > this.lastCounts![p])) this.wakeAt = this.now()
+    this.lastCounts = { ...state.counts }
+    if (state.round) this.wakeAt = Math.max(this.wakeAt, state.round.startedAt)
 
     // Las subs nuevas: gota, nombre y sonido (las que ya estaban al abrir el overlay, no).
     for (const ev of state.feed) {
@@ -395,7 +410,7 @@ export class View {
     c.fillStyle = ['#7a5af8', '#e0761e', '#1f9d6b', '#d92b6b', '#2e7de0', '#c2410c'][hash % 6]!
     c.fillRect(0, 0, 24, 24)
     c.fillStyle = '#fff'
-    c.font = 'bold 16px "Pixelify Sans", monospace'
+    c.font = `bold 16px ${getComputedStyle(this.stage).fontFamily}`
     c.textAlign = 'center'
     c.textBaseline = 'middle'
     c.fillText((name[0] ?? '?').toUpperCase(), 12, 13)
@@ -480,6 +495,9 @@ export class View {
     const potion = this.potions[p]
     const stage = this.stage
     const hero = $(stage, '#hero')
+    // Si estaban escondidas, primero se deja que asomen y luego vuela la poción.
+    const rising = 700 - (Date.now() - this.wokeAt)
+    if (rising > 0) await wait(rising)
     const k = stage.getBoundingClientRect().width / 1920
     const sr = stage.getBoundingClientRect()
     const r = potion.cv.getBoundingClientRect()
@@ -656,10 +674,20 @@ export class View {
     if (ok) { burst($(this.stage, '#card'), ['#5ee37a', '#bbf7d0', '#fff', '#ffe27a'], 70, 3, 260); sfx.win() } else sfx.fail()
   }
 
+  /** Pociones: un minuto sin subs y se meten detrás de la cámara (en la vista previa del panel, no). */
+  private sleepCheck(now: number) {
+    const config = this.snap?.config
+    const asleep = !!config?.autoHide && !this.preview && !this.heroP && now - this.wakeAt > SLEEP_MS
+    const wrap = $(this.stage, '#potionsWrap')
+    if (!asleep && wrap.classList.contains('asleep')) this.wokeAt = Date.now()
+    wrap.classList.toggle('asleep', asleep)
+  }
+
   /** Cada 100 ms: lleva la tarjeta del reto a la fase que toca según la hora. */
   private tick() {
     const r = this.snap?.state.round ?? null
     const now = this.now()
+    this.sleepCheck(now)
     if (!r) {
       if (this.roundId) { this.hideCard(); $(this.stage, '#banner').classList.remove('low'); this.roundId = null }
       return

@@ -5,8 +5,8 @@ import { Input } from '@/components/arc/input/input'
 import SegmentedControl from '@/components/arc/segmented-control/segmented-control'
 import type { PanelData } from '@/lib/api'
 import {
-  defaultChallenges, DIFFICULTY_NAME, PLATFORMS, PLATFORM_NAME, REWARD_ID,
-  type Challenge, type Config, type Difficulty, type Mode, type PanelOp, type Platform, type Style,
+  defaultChallenges, DIFFICULTY_NAME, FONTS, FONT_NAME, PLATFORMS, PLATFORM_NAME, REWARD_ID,
+  type Challenge, type Config, type Difficulty, type Font, type Mode, type PanelOp, type Platform, type Style,
 } from '../../shared/logic'
 
 type Patch = (change: Partial<Config>) => void
@@ -69,6 +69,11 @@ export function SettingsPanel({ data, patch, ops }: { data: PanelData; patch: Pa
         <p className="hint-text">{c.style === 'potions'
           ? 'Las tres pociones asoman por encima de la cámara, delante la que va ganando. Al llenarse, la poción vuela al centro.'
           : 'El overlay queda limpio: con cada sub baja un banner arriba con corazones y vuelve a subir. Al completar una meta, el banner lo celebra.'}</p>
+        {c.style === 'potions' && <Switch label="Esconder las pociones sin subs" description="Si pasa un minuto sin ninguna sub, bajan y se meten detrás de la cámara. Con la siguiente sub vuelven a salir." checked={c.autoHide} onChange={v => patch({ autoHide: v })} />}
+        <h3 className="group__title">Tipografía</h3>
+        <SegmentedControl label="Tipografía del overlay" value={c.font} onValueChange={v => patch({ font: v as Font })}
+          options={FONTS.map(f => ({ value: f, label: FONT_NAME[f] }))} />
+        <p className="hint-text">Todas pixeladas. Jersey 10 y VT323 se leen mejor en pequeño (con Pixelify Sans el 2 se confunde con el 8 y el 5 con la S).</p>
       </div>
 
       <div className="group">

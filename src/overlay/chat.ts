@@ -142,11 +142,46 @@ const kickUrl = (c: KickCreds) => `wss://ws-${c.cluster}.pusher.com/app/${c.appK
 
 type KickMessage = { id?: string; content?: string; created_at?: string; sender?: { id?: number; username?: string; slug?: string; identity?: { badges?: { type?: string }[] } } }
 
-function connectKick(chatroom: string, creds: KickCreds, onLine: (l: Line) => void, onSub: (s: Sub) => void, onStatus: (s: ReaderStatus) => void, onBadKey: () => void) {
+/** Un nombre de usuario de Kick, venga como texto o como objeto ({ username }). */
+const kickName = (v: unknown): string =>
+  typeof v === 'string' ? v : v && typeof v === 'object' ? String((v as { username?: unknown; slug?: unknown }).username ?? (v as { slug?: unknown }).slug ?? '') : ''
+
+/**
+ * Un regalo de subs, con los nombres que trae según el aviso:
+ *   · GiftedSubscriptionsEvent (chat): gifter_username, gifted_usernames
+ *   · LuckyUsersWhoGotGiftSubscriptionsEvent (canal): gifter_username, usernames
+ */
+function kickGift(data: Record<string, unknown>) {
+  const list = [data.gifted_usernames, data.usernames, data.recipients, data.gifted_users].find(Array.isArray) as unknown[] | undefined
+  const names = (list ?? []).map(kickName).filter(Boolean).map(n => n.toLowerCase())
+  const count = Number(data.quantity ?? data.gifted_count ?? data.count ?? 0)
+  const gifter = kickName(data.gifter_username ?? data.gifter ?? data.sender ?? data.username) || 'Anónimo'
+  return { gifter, names, n: Math.max(1, names.length || (Number.isFinite(count) ? count : 0) || 1) }
+}
+
+function connectKick(chatroom: string, channelId: string | null, creds: KickCreds, onLine: (l: Line) => void, onSub: (s: Sub) => void, onStatus: (s: ReaderStatus) => void, onBadKey: () => void) {
   let socket: WebSocket | null = null
   let stopped = false
   let attempt = 0
   let retry: ReturnType<typeof setTimeout> | undefined
+  // Kick reparte los avisos entre varios canales (el chat y el propio canal) y algunos llegan repetidos
+  // por más de uno: el mismo regalo puede venir como GiftedSubscriptionsEvent y como LuckyUsers…
+  const channels = [`chatrooms.${chatroom}.v2`, `chatrooms.${chatroom}`, `chatroom_${chatroom}`, ...(channelId ? [`channel.${channelId}`, `channel_${channelId}`] : [])]
+  const seenLines = new Set<string>()
+  let gifts: { gifter: string; names: string[]; n: number; at: number }[] = []
+  const recentSubs = new Map<string, number>()
+
+  const gift = (data: Record<string, unknown>) => {
+    const g = kickGift(data)
+    const now = Date.now()
+    gifts = gifts.filter(x => now - x.at < 20_000)
+    // ¿Es el mismo regalo que ya llegó por otro lado? Misma persona y mismos agraciados (o, sin nombres, la misma cantidad).
+    const key = g.gifter.toLowerCase()
+    const same = gifts.find(x => x.gifter === key && (g.names.length && x.names.length ? g.names.some(n => x.names.includes(n)) : x.n === g.n))
+    if (same) return
+    gifts.push({ gifter: key, names: g.names, n: g.n, at: now })
+    onSub({ id: `k-gift-${key}-${g.names.slice(0, 3).join(',') || g.n}-${Math.floor(now / 30_000)}`, p: 'kick', name: g.gifter, n: g.n, at: now, gift: true, renewal: false })
+  }
 
   const open = () => {
     onStatus('connecting')
@@ -159,7 +194,7 @@ function connectKick(chatroom: string, creds: KickCreds, onLine: (l: Line) => vo
       try { data = typeof msg.data === 'string' ? JSON.parse(msg.data) : (msg.data ?? {}) } catch { /* sin datos */ }
       switch (msg.event) {
         case 'pusher:connection_established':
-          ws.send(JSON.stringify({ event: 'pusher:subscribe', data: { auth: '', channel: `chatrooms.${chatroom}.v2` } }))
+          for (const channel of channels) ws.send(JSON.stringify({ event: 'pusher:subscribe', data: { auth: '', channel } }))
           break
         case 'pusher:error': {
           // 4001: la clave ya no vale (Kick la ha cambiado). Se deja de reintentar con esta y se pide otra.
@@ -176,6 +211,11 @@ function connectKick(chatroom: string, creds: KickCreds, onLine: (l: Line) => vo
           break
         case 'App\\Events\\ChatMessageEvent': {
           const m = data as KickMessage
+          if (m.id) {
+            if (seenLines.has(m.id)) break
+            seenLines.add(m.id)
+            if (seenLines.size > 500) seenLines.delete(seenLines.values().next().value!)
+          }
           const user = m.sender?.username ?? ''
           const badges = m.sender?.identity?.badges ?? []
           onLine({
@@ -192,16 +232,22 @@ function connectKick(chatroom: string, creds: KickCreds, onLine: (l: Line) => vo
         case 'App\\Events\\SubscriptionEvent': {
           const user = String(data.username ?? 'Kick')
           const months = Number(data.months ?? 1)
+          // La misma sub puede llegar por dos canales a la vez.
+          const subKey = `${user.toLowerCase()}-${months}`
+          if (Date.now() - (recentSubs.get(subKey) ?? 0) < 60_000) break
+          recentSubs.set(subKey, Date.now())
           // Kick no da id: se usa el nombre y el minuto, para no contarla dos veces si se repite.
           onSub({ id: `k-sub-${user}-${months}-${Math.floor(Date.now() / 60_000)}`, p: 'kick', name: user, n: 1, at: Date.now(), gift: false, renewal: months > 1 })
           break
         }
-        case 'App\\Events\\GiftedSubscriptionsEvent': {
-          const gifted = Array.isArray(data.gifted_usernames) ? data.gifted_usernames.length : 1
-          const gifter = String(data.gifter_username ?? 'Anónimo')
-          onSub({ id: `k-gift-${gifter}-${data.gifter_total ?? ''}-${Math.floor(Date.now() / 10_000)}`, p: 'kick', name: gifter, n: Math.max(1, gifted), at: Date.now(), gift: true, renewal: false })
+        case 'App\\Events\\GiftedSubscriptionsEvent':
+        case 'App\\Events\\LuckyUsersWhoGotGiftSubscriptionsEvent':
+          gift(data)
           break
-        }
+        default:
+          // Por si Kick cambia el nombre del aviso de los regalos.
+          if (msg.event && /gift/i.test(msg.event) && /sub/i.test(msg.event) && !/leaderboard/i.test(msg.event)) gift(data)
+          else if (msg.event && !msg.event.startsWith('pusher')) console.debug('[retos] Kick:', msg.event, msg.channel)
       }
     }
     ws.onclose = () => {
@@ -243,7 +289,7 @@ export class ChatReader {
   private readonly lock = new AbortController()
   private readonly started = Date.now()
   private twitch: { channel: string; stop: () => void } | null = null
-  private kick: { room: string; key: string; stop: () => void } | null = null
+  private kick: { room: string; channel: string | null; key: string; stop: () => void } | null = null
   private kickLookup = { slug: '', at: 0, running: false }
   private kickBadKey = false
   private youtube: { channel: string; abort: AbortController } | null = null
@@ -330,17 +376,19 @@ export class ChatReader {
     try {
       const fresh = this.kickBadKey
       this.kickBadKey = false
-      const info = await overlayApi<{ slug: string; chatroomId: string | null; appKey?: string; cluster?: string }>(this.key, fresh ? '/kick?fresh=1' : '/kick')
+      const info = await overlayApi<{ slug: string; chatroomId: string | null; channelId?: string | null; appKey?: string; cluster?: string }>(this.key, fresh ? '/kick?fresh=1' : '/kick')
       const creds: KickCreds = info?.appKey && info.cluster ? { appKey: info.appKey, cluster: info.cluster } : KICK_FALLBACK
       let room = info?.chatroomId ?? null
-      if (!room && info?.slug) {
+      let channel = info?.channelId ?? null
+      if ((!room || !channel) && info?.slug) {
         // Desde el ordenador del streamer Kick a veces sí contesta.
-        room = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(info.slug)}`)
-          .then(r => (r.ok ? r.json() : null))
-          .then((d: { chatroom?: { id?: number } } | null) => (d?.chatroom?.id ? String(d.chatroom.id) : null))
+        const d = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(info.slug)}`)
+          .then(r => (r.ok ? r.json() as Promise<{ id?: number; chatroom?: { id?: number } }> : null))
           .catch(() => null)
+        room ??= d?.chatroom?.id ? String(d.chatroom.id) : null
+        channel ??= d?.id ? String(d.id) : null
       }
-      if (this.kick && (this.kick.room !== room || this.kick.key !== creds.appKey)) { this.kick.stop(); this.kick = null }
+      if (this.kick && (this.kick.room !== room || this.kick.channel !== channel || this.kick.key !== creds.appKey)) { this.kick.stop(); this.kick = null }
       if (!room) { this.setStatus('kick', 'error', 'Kick: no se encuentra el chat. Pon su número en el panel.'); return }
       if (!this.kick) {
         const onBadKey = () => {
@@ -351,7 +399,7 @@ export class ChatReader {
           this.kickLookup.slug = ''
           this.setStatus('kick', 'error', 'Kick: ha cambiado la clave de su chat, buscando la nueva…')
         }
-        this.kick = { room, key: creds.appKey, stop: connectKick(room, creds, l => this.take(l), s => this.take_sub(s), s => this.setStatus('kick', s, ''), onBadKey) }
+        this.kick = { room, channel, key: creds.appKey, stop: connectKick(room, channel, creds, l => this.take(l), s => this.take_sub(s), s => this.setStatus('kick', s, ''), onBadKey) }
       }
     } finally {
       this.kickLookup.running = false

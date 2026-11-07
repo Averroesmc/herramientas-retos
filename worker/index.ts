@@ -184,23 +184,31 @@ async function twitchAvatar(login: string): Promise<string | null> {
   return url
 }
 
-const kickCache = new Map<string, { id: string | null; at: number }>()
+type KickIds = { chatroom: string | null; channel: string | null }
+const kickCache = new Map<string, KickIds & { at: number }>()
 
-/** El número del chat de un canal de Kick. Kick a veces no deja preguntarlo desde un servidor: entonces null. */
-async function kickChatroom(slug: string): Promise<string | null> {
+/**
+ * El número del chat de un canal de Kick y el del propio canal (por ahí llegan algunos avisos, como
+ * los regalos de subs). Kick a veces no deja preguntarlo desde un servidor: entonces null.
+ */
+async function kickIds(slug: string): Promise<KickIds> {
   const key = slug.toLowerCase()
   const hit = kickCache.get(key)
-  if (hit && Date.now() - hit.at < 10 * 60_000) return hit.id
-  let id: string | null = null
+  if (hit && Date.now() - hit.at < 10 * 60_000) return hit
+  const ids: KickIds = { chatroom: null, channel: null }
   try {
     const res = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(key)}`, {
       headers: { accept: 'application/json', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36' },
       signal: AbortSignal.timeout(8000),
     })
-    if (res.ok) id = String((await res.json<{ chatroom?: { id?: number } }>()).chatroom?.id ?? '') || null
+    if (res.ok) {
+      const d = await res.json<{ id?: number; chatroom?: { id?: number } }>()
+      ids.chatroom = String(d.chatroom?.id ?? '') || null
+      ids.channel = String(d.id ?? '') || null
+    }
   } catch { /* sin respuesta */ }
-  kickCache.set(key, { id, at: Date.now() })
-  return id
+  kickCache.set(key, { ...ids, at: Date.now() })
+  return ids
 }
 
 /**
@@ -297,9 +305,9 @@ async function overlay(request: Request, env: Env, pathname: string) {
   }
   if (pathname === '/api/overlay/kick' && request.method === 'GET') {
     const slug = config.channels.kick.replace(/^https?:\/\/(www\.)?kick\.com\//i, '').replace(/[/?#].*$/, '').trim()
-    if (!slug) return json({ slug: '', chatroomId: null })
-    const { appKey, cluster } = await kickCredentials(url.searchParams.has('fresh'))
-    return json({ slug, chatroomId: config.kickChatroom || (await kickChatroom(slug)), appKey, cluster })
+    if (!slug) return json({ slug: '', chatroomId: null, channelId: null })
+    const [{ appKey, cluster }, ids] = await Promise.all([kickCredentials(url.searchParams.has('fresh')), kickIds(slug)])
+    return json({ slug, chatroomId: config.kickChatroom || ids.chatroom, channelId: ids.channel, appKey, cluster })
   }
   return json({ error: 'no encontrado' }, 404)
 }

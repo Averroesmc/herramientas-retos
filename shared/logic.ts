@@ -18,6 +18,10 @@ export type Difficulty = 1 | 2 | 3
 export const DIFFICULTY_NAME: Record<Difficulty, string> = { 1: 'Medio', 2: 'Difícil', 3: 'Muy difícil' }
 
 export type Style = 'potions' | 'banner'
+/** La tipografía pixelada del overlay. Pixelify era la de siempre, pero en pequeño el 2 parece un 8 y el 5 una S. */
+export type Font = 'jersey' | 'pixelify' | 'vt323'
+export const FONTS: Font[] = ['jersey', 'pixelify', 'vt323']
+export const FONT_NAME: Record<Font, string> = { jersey: 'Jersey 10', pixelify: 'Pixelify Sans', vt323: 'VT323' }
 export type Mode = 'winner' | 'all' | 'roulette'
 export type ReaderStatus = 'off' | 'connecting' | 'ok' | 'error'
 
@@ -26,6 +30,9 @@ export interface Challenge { id: string; text: string; diff: Difficulty; on: boo
 
 export interface Config {
   style: Style
+  font: Font
+  /** Pociones: si pasa un minuto sin subs, se esconden por debajo del borde de la cámara. */
+  autoHide: boolean
   goals: Record<Platform, number>
   enabled: Record<Platform, boolean>
   /** Canal de Twitch, canal de YouTube (@canal, enlace o id) y canal de Kick. */
@@ -171,6 +178,8 @@ export function defaultChallenges(): Challenge[] {
 export function defaultConfig(): Config {
   return {
     style: 'potions',
+    font: 'jersey',
+    autoHide: true,
     goals: { twitch: 10, youtube: 5, kick: 5 },
     enabled: { twitch: true, youtube: true, kick: false },
     channels: { twitch: '', youtube: '', kick: '' },
@@ -246,6 +255,8 @@ export function sanitizeConfig(raw: unknown, base: Config = defaultConfig()): Co
   const reward = o.reward && typeof o.reward === 'object' ? (o.reward as Record<string, unknown>) : {}
   return {
     style: o.style === 'potions' || o.style === 'banner' ? o.style : base.style,
+    font: FONTS.includes(o.font as Font) ? (o.font as Font) : base.font,
+    autoHide: bool(o.autoHide, base.autoHide),
     goals: perPlatform(o.goals, base.goals, (v, b) => clamp(v, 1, 9999, b)),
     enabled: perPlatform(o.enabled, base.enabled, (v, b) => bool(v, b)),
     channels: perPlatform(o.channels, base.channels, (v, b) => (typeof v === 'string' ? str(v, 200) : b)),

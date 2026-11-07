@@ -9,15 +9,16 @@
 ## Cómo funciona
 
 - **Dos estilos de overlay**:
-  - *Pociones*: tres pociones pixeladas que asoman por encima de la cámara, delante la que va ganando. Con cada sub cae una gota, y al llenarse la poción vuela al centro, salta el corcho y empieza el reto.
+  - *Pociones*: tres pociones pixeladas que asoman por encima de la cámara, delante la que va ganando. Con cada sub cae una gota, y al llenarse la poción vuela al centro, salta el corcho y empieza el reto. Si pasa un minuto sin subs, bajan y se esconden detrás de la cámara hasta la siguiente (se puede desactivar).
   - *Banner con corazones*: el overlay queda limpio. Con cada sub baja un banner arriba en el centro con una fila de corazones por plataforma, y vuelve a subir.
+- **Tipografía**: Jersey 10 (por defecto), Pixelify Sans o VT323, todas pixeladas. Con Pixelify, en pequeño, el 2 se confunde con el 8 y el 5 con la S.
 - **El reto**: salen 3 retos de la lista (los activos que no se han completado en este directo). Según la configuración vota el chat de la plataforma ganadora, votan todos los chats o decide una ruleta. Si hay empate, también decide una ruleta. Luego sale un temporizador (15 minutos por defecto).
 - **Conseguido o fallado**: desde el panel, o desde el chat con `!completado` / `!fallado` (también `!conseguido` o `!fallo`). Solo cuentan los moderadores y el propio streamer, y solo el primer comando. Se puede activar o desactivar por plataforma.
 - **Retos completados**: no vuelven a salir en el mismo directo. Vuelven con «Nuevo directo» o solos tras 8 horas sin actividad.
 - **Qué cuenta como sub**:
   - Twitch: subs, resubs y regaladas.
   - YouTube: miembros nuevos, aniversarios y regalos de membresía.
-  - Kick: subs y regaladas.
+  - Kick: subs y regaladas (los regalos llegan por el chat y por el canal, se escuchan los dos y se juntan si vienen repetidos).
   - Las renovaciones se pueden desactivar.
 
 - **Retos con puntos del canal (Twitch)**: en la configuración se enlaza una recompensa («Detectar recompensa» y canjearla una vez, o pegando su ID). Cada canje añade su texto a la lista de retos, con el nombre de quien lo pidió, y en el overlay sale arriba a la derecha un aviso «¡Nuevo reto!» con su foto pixelada. La recompensa tiene que pedir texto al espectador: los canjes sin texto no llegan al chat. La foto se busca en decapi.me (o unavatar.io), porque el chat no la trae.
