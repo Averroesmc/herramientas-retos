@@ -93,6 +93,8 @@ class Potion {
   full = false
   corkGone = false
   excite = 0
+  /** Hasta esta hora (performance.now) el líquido no sube: se espera a que caiga la gota. */
+  holdUntil = 0
   private slosh = 0
   private bubbles: { x: number; y: number; vy: number }[] = []
   private drops: { x: number; y: number; vy: number; dead?: boolean }[] = []
@@ -140,7 +142,7 @@ class Potion {
   }
 
   step(t: number) {
-    this.shown += (this.target - this.shown) * 0.05
+    if (performance.now() >= this.holdUntil) this.shown += (this.target - this.shown) * 0.05
     if (Math.abs(this.target - this.shown) < 0.001) this.shown = this.target
     this.slosh *= 0.96
     this.excite *= 0.97
@@ -344,16 +346,23 @@ export class View {
       this.renderHearts(potion, full ? 1 : count / goal, goal)
     }
 
-    // Delante (hueco 0) la que va más llena; detrás, las demás. En empate se queda como estaba.
+    // Pociones: delante (hueco 0) la de la sub más reciente; detrás, las demás. Al abrir el overlay,
+    // por la hora de su última sub. Cada sub nueva la trae al frente (más abajo).
     const visible = PLATFORMS.filter(p => config.enabled[p])
     this.order = [...this.order.filter(p => visible.includes(p)), ...visible.filter(p => !this.order.includes(p))]
-    this.order.sort((a, b) => this.potions[b].target - this.potions[a].target)
-    this.order.forEach((p, i) => {
-      this.potions[p].el.dataset.slot = String(i)
+    if (this.first) {
+      const last = (p: Platform) => Math.max(0, ...state.feed.filter(e => e.p === p).map(e => e.at))
+      this.order.sort((a, b) => last(b) - last(a))
+    }
+    // La tabla de al lado: arriba la que va más llena. En empate se queda como estaba.
+    const board = [...this.order].sort((a, b) => this.potions[b].target - this.potions[a].target)
+    board.forEach((p, i) => {
       this.potions[p].row.style.setProperty('--o', String(i))
       this.potions[p].row.classList.toggle('first', i === 0 && this.potions[p].target > 0)
     })
 
+    // Si estaban escondidas detrás de la cámara, tardan un poco más en estar arriba.
+    const wasAsleep = $(this.stage, '#potionsWrap').classList.contains('asleep')
     // Despiertan las pociones: la última sub (también las de antes de abrir el overlay), una poción
     // que sube (los botones del panel) o un reto nuevo.
     for (const ev of state.feed) if (config.enabled[ev.p]) this.wakeAt = Math.max(this.wakeAt, ev.at)
@@ -372,12 +381,21 @@ export class View {
         potion.popup(html, potion.hrow)
         for (const p of PLATFORMS) this.potions[p].hrow.classList.toggle('hot', p === ev.p)
         this.showBanner(4500)
+        if (config.subSound) sfx.drop()
       } else {
-        potion.popup(html, potion.el)
-        potion.drop(ev.n)
+        // La poción de la sub se pone delante y, cuando ha llegado (y ha salido de detrás de la cámara), le cae la gota.
+        const moving = this.order[0] !== ev.p
+        this.order = [ev.p, ...this.order.filter(p => p !== ev.p)]
+        const delay = (moving ? 450 : 0) + (wasAsleep ? 550 : 0)
+        potion.holdUntil = performance.now() + delay + 350
+        setTimeout(() => {
+          potion.popup(html, potion.el)
+          potion.drop(ev.n)
+          if (config.subSound) sfx.drop()
+        }, delay)
       }
-      if (config.subSound) sfx.drop()
     }
+    this.order.forEach((p, i) => { this.potions[p].el.dataset.slot = String(i) })
     // Retos nuevos por puntos del canal: se anuncian uno detrás de otro.
     for (const a of state.added ?? []) {
       if (this.seenAdded.has(a.id)) continue

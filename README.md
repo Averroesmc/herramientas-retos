@@ -9,7 +9,7 @@
 ## Cómo funciona
 
 - **Dos estilos de overlay**:
-  - *Pociones*: tres pociones pixeladas que asoman por encima de la cámara, delante la que va ganando. Con cada sub cae una gota, y al llenarse la poción vuela al centro, salta el corcho y empieza el reto. Si pasa un minuto sin subs, bajan y se esconden detrás de la cámara hasta la siguiente (se puede desactivar).
+  - *Pociones*: tres pociones pixeladas que asoman por encima de la cámara, delante la de la sub más reciente (la tabla de al lado sigue ordenada por la que va ganando). Con cada sub, su poción se pone delante y luego le cae una gota, y al llenarse la poción vuela al centro, salta el corcho y empieza el reto. Si pasa un minuto sin subs, bajan y se esconden detrás de la cámara hasta la siguiente (se puede desactivar).
   - *Banner con corazones*: el overlay queda limpio. Con cada sub baja un banner arriba en el centro con una fila de corazones por plataforma, y vuelve a subir.
 - **Tipografía**: Jersey 10 (por defecto), Pixelify Sans o VT323, todas pixeladas. Con Pixelify, en pequeño, el 2 se confunde con el 8 y el 5 con la S.
 - **El reto**: salen 3 retos de la lista (los activos que no se han completado en este directo). Según la configuración vota el chat de la plataforma ganadora, votan todos los chats o decide una ruleta. Si hay empate, también decide una ruleta. Luego sale un temporizador (15 minutos por defecto).
