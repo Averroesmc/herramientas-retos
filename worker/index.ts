@@ -87,13 +87,25 @@ async function mutate(db: D1Database, where: { userId: string } | { key: string 
 
 type Owner = { id: string; name: string; avatar: string }
 
-function panelView(l: Loaded & { now: number }, access: Access, owner: Owner, env: Env) {
+/** Para admin: quién tiene acceso a retos, para saltar de unos retos a otros (como en el teatro). */
+async function people(db: D1Database): Promise<Owner[]> {
+  const { results } = await db.prepare(`
+    SELECT DISTINCT u.id, u.username, u.name, u.avatar FROM users u
+    LEFT JOIN permissions p ON p.user_id = u.id AND p.tool = 'retos'
+    WHERE u.is_admin = 1 OR p.tool IS NOT NULL ORDER BY u.is_admin DESC, lower(coalesce(u.name, u.username))`)
+    .all<{ id: string; username: string; name: string | null; avatar: string | null }>()
+  return results.map(u => ({ id: u.id, name: u.name || u.username || 'Sin nombre', avatar: discordAvatar(u.id, u.avatar) }))
+}
+
+function panelView(l: Loaded & { now: number }, access: Access, owner: Owner, env: Env, everyone: Owner[] = []) {
   return {
     user: access.user,
     admin: access.admin,
     /** De quién es esta configuración: la propia, o la de otra persona si admin la está editando. */
     owner,
     other: owner.id !== access.user.id,
+    /** Solo para admin: las personas cuyos retos puede abrir. */
+    people: everyone,
     key: l.key,
     config: l.config,
     state: viewOf(l.state),
@@ -127,7 +139,9 @@ async function panel(request: Request, env: Env, pathname: string) {
   const where = { userId: owner.id }
 
   if (pathname === '/api/panel' && request.method === 'GET') {
-    return json(panelView((await mutate(env.DB, where))!, access, owner, env))
+    // La lista de personas solo la primera vez (?people=1), no en cada consulta de cada 2 s.
+    const everyone = access.admin && new URL(request.url).searchParams.has('people') ? await people(env.DB) : []
+    return json(panelView((await mutate(env.DB, where))!, access, owner, env, everyone))
   }
   if (pathname === '/api/panel/config' && request.method === 'PUT') {
     const body = await request.json<{ config?: unknown }>().catch(() => ({ config: undefined }))

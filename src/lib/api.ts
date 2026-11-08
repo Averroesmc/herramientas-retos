@@ -8,6 +8,8 @@ export type PanelData = {
   /** De quién es la configuración (la propia o, para admin, la de otra persona). */
   owner: { id: string; name: string; avatar: string }
   other: boolean
+  /** Solo para admin, y solo cuando se pide: las personas con acceso a retos. */
+  people: { id: string; name: string; avatar: string }[]
   key: string
   config: Config
   state: StateView
@@ -18,7 +20,12 @@ export type PanelData = {
 
 /** Con ?persona=<id> admin abre los retos de otra persona. */
 const persona = new URLSearchParams(location.search).get('persona')
-const withPersona = (path: string) => (persona ? `${path}?persona=${encodeURIComponent(persona)}` : path)
+const withPersona = (path: string) => {
+  const [route, query] = path.split('?')
+  const params = new URLSearchParams(query)
+  if (persona) params.set('persona', persona)
+  return params.size ? `${route}?${params}` : route!
+}
 
 export class ApiError extends Error {
   status: number
@@ -32,7 +39,7 @@ async function call(path: string, init?: RequestInit): Promise<PanelData> {
   return data
 }
 
-export const fetchPanel = () => call('/api/panel')
+export const fetchPanel = (withPeople = false) => call(withPeople ? '/api/panel?people=1' : '/api/panel')
 export const saveConfig = (config: Partial<Config>) => call('/api/panel/config', { method: 'PUT', body: JSON.stringify({ config }) })
 export const sendOps = (...ops: PanelOp[]) => call('/api/panel/ops', { method: 'POST', body: JSON.stringify({ ops }) })
 export const newKey = () => call('/api/panel/key', { method: 'POST' })

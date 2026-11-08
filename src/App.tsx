@@ -17,6 +17,7 @@ export default function App() {
   const [saving, setSaving] = useState(false)
   const versionRef = useRef(-1)
   const [skew, setSkew] = useState(0)
+  const [people, setPeople] = useState<PanelData['people']>([])
 
   const notify = useCallback((title: string, description?: string) => setNotice({ key: Date.now(), title, description }), [])
   const accept = useCallback((next: PanelData) => {
@@ -30,9 +31,13 @@ export default function App() {
   useEffect(() => {
     let stop = false
     let timer: ReturnType<typeof setTimeout>
+    let first = true
     const tick = async () => {
       try {
-        accept(await fetchPanel())
+        const next = await fetchPanel(first)
+        if (first && next.people.length) setPeople(next.people)
+        first = false
+        accept(next)
         setError(null)
       } catch (e) {
         if (e instanceof ApiError && (e.status === 401 || e.status === 403 || e.status === 404)) { setError(e.message); return }
@@ -62,6 +67,14 @@ export default function App() {
       setSaving(false)
     }, 500)
   }, [accept, notify])
+
+  // Admin: abrir los retos de otra persona (o volver a los tuyos). Se recarga la página con ?persona=.
+  const switchPerson = (id: string) => {
+    const url = new URL(location.href)
+    if (id && id !== data?.user.id) url.searchParams.set('persona', id)
+    else url.searchParams.delete('persona')
+    location.href = url.toString()
+  }
 
   return (
     <div className="app">
@@ -93,10 +106,18 @@ export default function App() {
             <section className="hero hero--retos">
               <div className="hero__blobs" aria-hidden="true" />
               <div className="hero__copy">
-                <span className="hero__eyebrow">Batalla de pociones</span>
-                <h1 className="hero__title">Retos del chat</h1>
+                <span className="hero__eyebrow">{data.other ? 'Editando como admin' : 'Batalla de pociones'}</span>
+                <h1 className="hero__title">{data.other ? `Retos de ${data.owner.name}` : 'Retos del chat'}</h1>
                 <p className="hero__lead">Twitch, YouTube y Kick llenan su poción con subs y miembros. La primera en llegar a su meta gana un reto de {data.config.challengeMin} minutos.</p>
               </div>
+              {data.admin && people.length > 1 && (
+                <label className="person-picker">
+                  <span className="person-picker__label">Ver los retos de</span>
+                  <select className="select" value={data.owner.id} disabled={saving} onChange={e => switchPerson(e.target.value)}>
+                    {people.map(p => <option key={p.id} value={p.id}>{p.id === data.user.id ? `${p.name} (tú)` : p.name}</option>)}
+                  </select>
+                </label>
+              )}
             </section>
             <div className="columns">
               <div className="column">
