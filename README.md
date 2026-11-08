@@ -5,6 +5,7 @@
 - **Panel** (`/`): con la sesión de herramientas y acceso a «retos». Desde ahí se configura todo: estilo del overlay, metas, canales, minutos del reto, votación, sonidos, posición de la cámara y la lista de retos. También tiene los botones para probar (+1, +5, llenar) y para marcar el reto como conseguido o fallado.
 - **Overlay para OBS** (`/o/<clave>`): fuente de navegador de 1920 × 1080. No pide login: la clave larga hace de contraseña. Si se cambia el enlace desde el panel, el anterior deja de funcionar.
 - **Admin** puede abrir la configuración de cualquier persona: arriba sale el desplegable «Ver los retos de» (como en el teatro), con quien tenga acceso a retos. También con `/?persona=<id de Discord>` (el botón «Editar sus retos» de la sección Personas de herramientas).
+- **Llevar los retos de otra persona sin ser admin**: en Personas de herramientas, admin le da a alguien «Lleva los retos de…» (tabla `delegations` de la base de datos compartida). Esa persona puede abrir y cambiar esos retos (con el mismo desplegable) aunque no tenga retos propios; si no los tiene, entra directa a los que lleva.
 
 ## Cómo funciona
 

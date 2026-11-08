@@ -36,12 +36,27 @@ const random = () => crypto.getRandomValues(new Uint32Array(1))[0]! / 2 ** 32
 
 let schema: Promise<unknown> | null = null
 function ensureSchema(db: D1Database) {
-  schema ??= db.prepare(`CREATE TABLE IF NOT EXISTS retos (
+  schema ??= db.batch([
+    db.prepare(`CREATE TABLE IF NOT EXISTS retos (
       user_id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, config TEXT NOT NULL, state TEXT NOT NULL,
-      version INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`)
-    .run()
-    .catch((error: unknown) => { schema = null; throw error })
+      version INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)`),
+    // Quién lleva la herramienta de otra persona sin ser admin (se da en Personas, en herramientas-web).
+    db.prepare(`CREATE TABLE IF NOT EXISTS delegations (
+      user_id TEXT NOT NULL, owner_id TEXT NOT NULL, tool TEXT NOT NULL, granted_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, owner_id, tool))`),
+  ]).catch((error: unknown) => { schema = null; throw error })
   return schema
+}
+
+type PersonRow = { id: string; username: string; name: string | null; avatar: string | null }
+const personOf = (u: PersonRow) => ({ id: u.id, name: u.name || u.username || 'Sin nombre', avatar: discordAvatar(u.id, u.avatar) })
+
+/** Las personas cuyos retos lleva alguien que no es admin (p. ej. Marta lleva los de Nenito). */
+async function delegatedOwners(db: D1Database, userId: string) {
+  const { results } = await db.prepare(`
+    SELECT u.id, u.username, u.name, u.avatar FROM delegations d JOIN users u ON u.id = d.owner_id
+    WHERE d.user_id = ? AND d.tool = 'retos' ORDER BY lower(coalesce(u.name, u.username))`).bind(userId).all<PersonRow>()
+  return results.map(personOf)
 }
 
 type Row = { user_id: string; key: string; config: string; state: string; version: number }
@@ -93,19 +108,21 @@ async function people(db: D1Database): Promise<Owner[]> {
     SELECT DISTINCT u.id, u.username, u.name, u.avatar FROM users u
     LEFT JOIN permissions p ON p.user_id = u.id AND p.tool = 'retos'
     WHERE u.is_admin = 1 OR p.tool IS NOT NULL ORDER BY u.is_admin DESC, lower(coalesce(u.name, u.username))`)
-    .all<{ id: string; username: string; name: string | null; avatar: string | null }>()
-  return results.map(u => ({ id: u.id, name: u.name || u.username || 'Sin nombre', avatar: discordAvatar(u.id, u.avatar) }))
+    .all<PersonRow>()
+  return results.map(personOf)
 }
 
-function panelView(l: Loaded & { now: number }, access: Access, owner: Owner, env: Env, everyone: Owner[] = []) {
+function panelView(l: Loaded & { now: number }, access: Access, owner: Owner, env: Env, everyone: Owner[] = [], own = true) {
   return {
     user: access.user,
     admin: access.admin,
     /** De quién es esta configuración: la propia, o la de otra persona si admin la está editando. */
     owner,
     other: owner.id !== access.user.id,
-    /** Solo para admin: las personas cuyos retos puede abrir. */
+    /** Las personas cuyos retos puede abrir (admin: todas; si no, las suyas y las que lleva). Solo con ?people=1. */
     people: everyone,
+    /** Si tiene retos propios (si no, solo lleva los de otras personas). */
+    own,
     key: l.key,
     config: l.config,
     state: viewOf(l.state),
@@ -122,31 +139,43 @@ function sameOrigin(request: Request) {
 async function panel(request: Request, env: Env, pathname: string) {
   const access = await readAccess(request, env.DB)
   if (!access) return json({ error: 'sin sesión' }, 401)
-  if (!access.tools.includes('retos')) return json({ error: 'sin acceso' }, 403)
+  const own = access.tools.includes('retos')
+  // Sin acceso propio también se entra si se llevan los retos de otra persona.
+  const delegated = access.admin ? [] : await delegatedOwners(env.DB, access.user.id)
+  if (!own && !delegated.length) return json({ error: 'sin acceso' }, 403)
   if (request.method !== 'GET' && !sameOrigin(request)) return json({ error: 'origen no permitido' }, 403)
 
-  // Admin puede abrir la configuración de cualquier persona (?persona=<id de Discord>) para dejársela hecha.
-  let owner: Owner = { id: access.user.id, name: access.user.name, avatar: access.user.avatar }
+  // Admin puede abrir la configuración de cualquier persona (?persona=<id de Discord>) para dejársela hecha;
+  // quien no es admin, la de las personas cuyos retos lleva. Sin retos propios se abren los primeros que lleva.
+  let owner: Owner = own ? { id: access.user.id, name: access.user.name, avatar: access.user.avatar } : delegated[0]!
   const persona = new URL(request.url).searchParams.get('persona')
-  if (persona && persona !== access.user.id) {
-    if (!access.admin) return json({ error: 'solo admin' }, 403)
-    const who = await env.DB.prepare('SELECT id, username, name, avatar FROM users WHERE id = ?').bind(persona)
-      .first<{ id: string; username: string; name: string | null; avatar: string | null }>()
-    if (!who) return json({ error: 'no existe esa persona' }, 404)
-    owner = { id: who.id, name: who.name || who.username || 'Sin nombre', avatar: discordAvatar(who.id, who.avatar) }
+  if (persona && persona !== owner.id) {
+    const mine = persona === access.user.id && own
+    const theirs = delegated.find(d => d.id === persona)
+    if (mine) owner = { id: access.user.id, name: access.user.name, avatar: access.user.avatar }
+    else if (theirs) owner = theirs
+    else {
+      if (!access.admin) return json({ error: 'no llevas los retos de esa persona' }, 403)
+      const who = await env.DB.prepare('SELECT id, username, name, avatar FROM users WHERE id = ?').bind(persona).first<PersonRow>()
+      if (!who) return json({ error: 'no existe esa persona' }, 404)
+      owner = personOf(who)
+    }
   }
+  const mineToo = own ? [{ id: access.user.id, name: access.user.name, avatar: access.user.avatar }] : []
+  const view = (l: Loaded & { now: number }, everyone: Owner[] = []) => panelView(l, access, owner, env, everyone, own)
   await ensureRow(env.DB, owner.id)
   const where = { userId: owner.id }
 
   if (pathname === '/api/panel' && request.method === 'GET') {
     // La lista de personas solo la primera vez (?people=1), no en cada consulta de cada 2 s.
-    const everyone = access.admin && new URL(request.url).searchParams.has('people') ? await people(env.DB) : []
-    return json(panelView((await mutate(env.DB, where))!, access, owner, env, everyone))
+    const wantsPeople = new URL(request.url).searchParams.has('people')
+    const everyone = !wantsPeople ? [] : access.admin ? await people(env.DB) : [...mineToo, ...delegated]
+    return json(view((await mutate(env.DB, where))!, everyone))
   }
   if (pathname === '/api/panel/config' && request.method === 'PUT') {
     const body = await request.json<{ config?: unknown }>().catch(() => ({ config: undefined }))
     const l = await mutate(env.DB, where, l => { l.config = sanitizeConfig(body.config, l.config); return true })
-    return json(panelView(l!, access, owner, env))
+    return json(view(l!))
   }
   if (pathname === '/api/panel/ops' && request.method === 'POST') {
     const body = await request.json<{ ops?: unknown }>().catch(() => ({ ops: undefined }))
@@ -157,11 +186,11 @@ async function panel(request: Request, env: Env, pathname: string) {
       // Lo que se suma a mano puede llenar una poción: que empiece su reto en el acto.
       return advance(l.state, l.config, now, random) || changed
     })
-    return json(panelView(l!, access, owner, env))
+    return json(view(l!))
   }
   if (pathname === '/api/panel/key' && request.method === 'POST') {
     await env.DB.prepare('UPDATE retos SET key = ?, version = version + 1 WHERE user_id = ?').bind(crypto.randomUUID(), owner.id).run()
-    return json(panelView((await mutate(env.DB, where))!, access, owner, env))
+    return json(view((await mutate(env.DB, where))!))
   }
   return json({ error: 'no encontrado' }, 404)
 }
@@ -346,7 +375,12 @@ export default {
       // El panel: solo con sesión y acceso a «retos».
       if (pathname === '/' || pathname === '/index.html') {
         const blocked = await gate(request, env.DB, 'retos', 'Retos')
-        if (blocked) return blocked
+        if (blocked) {
+          // Sin acceso propio, pero lleva los retos de otra persona: también pasa.
+          const access = blocked.status === 403 ? await readAccess(request, env.DB) : null
+          await ensureSchema(env.DB)
+          if (!access || !(await delegatedOwners(env.DB, access.user.id)).length) return blocked
+        }
       }
       return env.ASSETS.fetch(request)
     } catch (error) {

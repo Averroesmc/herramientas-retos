@@ -68,7 +68,7 @@ export default function App() {
     }, 500)
   }, [accept, notify])
 
-  // Admin: abrir los retos de otra persona (o volver a los tuyos). Se recarga la página con ?persona=.
+  // Abrir los retos de otra persona (o volver a los tuyos). Se recarga la página con ?persona=.
   const switchPerson = (id: string) => {
     const url = new URL(location.href)
     if (id && id !== data?.user.id) url.searchParams.set('persona', id)
@@ -100,17 +100,17 @@ export default function App() {
               <div className="other-banner">
                 <Avatar name={data.owner.name} src={data.owner.avatar} size="sm" />
                 <span>Estás editando los retos de <strong>{data.owner.name}</strong>. Lo que cambies aquí es su configuración y su overlay.</span>
-                <a href="/">Volver a los míos</a>
+                {data.own && <a href="/">Volver a los míos</a>}
               </div>
             )}
             <section className="hero hero--retos">
               <div className="hero__blobs" aria-hidden="true" />
               <div className="hero__copy">
-                <span className="hero__eyebrow">{data.other ? 'Editando como admin' : 'Batalla de pociones'}</span>
+                <span className="hero__eyebrow">{!data.other ? 'Batalla de pociones' : data.admin ? 'Editando como admin' : 'Llevas estos retos'}</span>
                 <h1 className="hero__title">{data.other ? `Retos de ${data.owner.name}` : 'Retos del chat'}</h1>
                 <p className="hero__lead">Twitch, YouTube y Kick llenan su poción con subs y miembros. La primera en llegar a su meta gana un reto de {data.config.challengeMin} minutos.</p>
               </div>
-              {data.admin && people.length > 1 && (
+              {people.length > 1 && (
                 <label className="person-picker">
                   <span className="person-picker__label">Ver los retos de</span>
                   <select className="select" value={data.owner.id} disabled={saving} onChange={e => switchPerson(e.target.value)}>

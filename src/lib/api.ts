@@ -8,8 +8,10 @@ export type PanelData = {
   /** De quién es la configuración (la propia o, para admin, la de otra persona). */
   owner: { id: string; name: string; avatar: string }
   other: boolean
-  /** Solo para admin, y solo cuando se pide: las personas con acceso a retos. */
+  /** Solo cuando se pide: las personas cuyos retos puede abrir (admin: todas; si no, las suyas y las que lleva). */
   people: { id: string; name: string; avatar: string }[]
+  /** Si tiene retos propios o solo lleva los de otras personas. */
+  own: boolean
   key: string
   config: Config
   state: StateView
@@ -18,7 +20,7 @@ export type PanelData = {
   youtubeKey: boolean
 }
 
-/** Con ?persona=<id> admin abre los retos de otra persona. */
+/** Con ?persona=<id> se abren los retos de otra persona (admin, o quien los lleve). */
 const persona = new URLSearchParams(location.search).get('persona')
 const withPersona = (path: string) => {
   const [route, query] = path.split('?')
