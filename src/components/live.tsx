@@ -147,7 +147,7 @@ export function RoundPanel({ data, skew, ops }: { data: PanelData; skew: number;
         <h2 className="panel__title">Reto de {PLATFORM_NAME[r.p]}</h2>
         <span className="tag">{PHASE_TEXT[phase]}</span>
       </div>
-      {!r.options.length && <p className="hint-text">No quedan retos activos sin completar en este directo. Añade más o pulsa «Nuevo directo».</p>}
+      {!r.options.length && <p className="hint-text">No quedan retos activos sin completar. Añade más o devuelve alguno de los completados en la lista de retos.</p>}
       {(phase === 'intro' || phase === 'vote') && r.options.length > 0 && (
         <ol className="options">
           {r.options.map((o, i) => (
@@ -230,7 +230,7 @@ export function HistoryPanel({ data, ops }: { data: PanelData; ops: Ops }) {
           ))}
         </ul>
       ) : <p className="hint-text">Todavía no se ha jugado ningún reto.</p>}
-      <p className="hint-text">Los retos completados no vuelven a salir en el mismo directo. «Nuevo directo» los devuelve a la lista; también se hace solo tras 8 horas sin actividad.</p>
+      <p className="hint-text">Los retos conseguidos quedan marcados como completados en la lista y ya no vuelven a salir (desde la lista se pueden devolver). Esta lista se vacía sola cada día a la hora de la vuelta a cero, o con «Nuevo directo».</p>
     </section>
   )
 }

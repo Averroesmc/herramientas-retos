@@ -25,14 +25,20 @@ export const FONT_NAME: Record<Font, string> = { jersey: 'Jersey 10', pixelify: 
 export type Mode = 'winner' | 'all' | 'roulette'
 export type ReaderStatus = 'off' | 'connecting' | 'ok' | 'error'
 
-/** `by`: quién lo pidió, si llegó por puntos del canal de Twitch. */
-export interface Challenge { id: string; text: string; diff: Difficulty; on: boolean; by?: string }
+/**
+ * `by`: quién lo pidió, si llegó por puntos del canal de Twitch. `done`: ya se consiguió y no vuelve a
+ * salir nunca (desde el panel se puede devolver a la lista).
+ */
+export interface Challenge { id: string; text: string; diff: Difficulty; on: boolean; by?: string; done?: boolean }
 
 export interface Config {
   style: Style
   font: Font
   /** Pociones: si pasa un minuto sin subs, se esconden por debajo del borde de la cámara. */
   autoHide: boolean
+  /** Cada día, a la hora `resetHour` (hora de España), todas las pociones vuelven a cero. */
+  dailyReset: boolean
+  resetHour: number
   goals: Record<Platform, number>
   enabled: Record<Platform, boolean>
   /** Canal de Twitch, canal de YouTube (@canal, enlace o id) y canal de Kick. */
@@ -93,8 +99,10 @@ export interface State {
   /** Plataformas que ya han llenado su poción y esperan su reto. */
   queue: Platform[]
   round: Round | null
-  /** Retos completados en este directo: no vuelven a salir hasta el siguiente. */
+  /** Antes, los retos completados en este directo. Ahora se marcan en el propio reto (`done`) y esto se queda vacío. */
   done: string[]
+  /** El día (AAAA-MM-DD) que va desde las `resetHour` de un día hasta las del siguiente: al cambiar, vuelta a cero. */
+  day?: string
   history: HistoryItem[]
   feed: FeedEvent[]
   seen: string[]
@@ -120,8 +128,11 @@ export const REVEAL_MS = 3200
 export const ROULETTE_MS = 3800
 /** «¡Conseguido!» o «Fallado» en pantalla. */
 export const RESULT_MS = 4200
-/** Sin actividad este tiempo, se entiende que es otro directo: los retos completados vuelven. */
-export const NEW_STREAM_MS = 8 * 3600_000
+/** El día «de directo»: el día de España en que cae la hora `now` contando desde las `hour` (9 → de 9:00 a 9:00). */
+const dayFormat = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid', year: 'numeric', month: '2-digit', day: '2-digit' })
+export function streamDay(now: number, hour: number) {
+  return dayFormat.format(new Date(now - hour * 3600_000))
+}
 
 const FEED_MAX = 40
 const SEEN_MAX = 600
@@ -182,6 +193,8 @@ export function defaultConfig(): Config {
     style: 'potions',
     font: 'jersey',
     autoHide: true,
+    dailyReset: true,
+    resetHour: 9,
     goals: { twitch: 10, youtube: 5, kick: 5 },
     enabled: { twitch: true, youtube: true, kick: false },
     channels: { twitch: '', youtube: '', kick: '' },
@@ -245,7 +258,7 @@ export function sanitizeChallenges(raw: unknown, base: Challenge[]): Challenge[]
     seen.add(id)
     const diff = clamp(c.diff, 1, 3, 2) as Difficulty
     const by = str(c.by, 40)
-    out.push({ id, text, diff, on: bool(c.on, true), ...(by ? { by } : {}) })
+    out.push({ id, text, diff, on: bool(c.on, true), ...(by ? { by } : {}), ...(c.done === true ? { done: true } : {}) })
   }
   return out
 }
@@ -259,6 +272,8 @@ export function sanitizeConfig(raw: unknown, base: Config = defaultConfig()): Co
     style: o.style === 'potions' || o.style === 'banner' ? o.style : base.style,
     font: FONTS.includes(o.font as Font) ? (o.font as Font) : base.font,
     autoHide: bool(o.autoHide, base.autoHide),
+    dailyReset: bool(o.dailyReset, base.dailyReset),
+    resetHour: clamp(o.resetHour, 0, 23, base.resetHour),
     goals: perPlatform(o.goals, base.goals, (v, b) => clamp(v, 1, 9999, b)),
     enabled: perPlatform(o.enabled, base.enabled, (v, b) => bool(v, b)),
     channels: perPlatform(o.channels, base.channels, (v, b) => (typeof v === 'string' ? str(v, 200) : b)),
@@ -317,7 +332,7 @@ function shuffle<T>(list: T[], random: Random) {
 }
 
 function startRound(state: State, config: Config, p: Platform, now: number, random: Random) {
-  const pool = config.challenges.filter(c => c.on && !state.done.includes(c.id))
+  const pool = config.challenges.filter(c => c.on && !c.done && !state.done.includes(c.id))
   const options = shuffle(pool, random).slice(0, 3).map(({ id, text, diff }) => ({ id, text, diff }))
   const vote = config.mode === 'roulette' ? 0 : config.voteSec * 1000
   const round: Round = {
@@ -362,7 +377,8 @@ export function tallyOf(round: Round): number[] {
 function finishRound(state: State, config: Config, round: Round) {
   const chosen = round.winner !== null ? round.options[round.winner] : null
   if (chosen && round.result) {
-    if (round.result.ok && !state.done.includes(chosen.id)) state.done.push(chosen.id)
+    // Conseguido: queda marcado en la lista y ya no vuelve a salir.
+    if (round.result.ok) { const c = config.challenges.find(x => x.id === chosen.id); if (c) c.done = true }
     state.history.unshift({ id: chosen.id, text: chosen.text, p: round.p, ok: round.result.ok, by: round.result.by, at: round.result.at })
     state.history = state.history.slice(0, HISTORY_MAX)
   }
@@ -381,13 +397,25 @@ function queueIfFull(state: State, config: Config, p: Platform) {
 
 /**
  * Lo que pasa solo con el tiempo: cerrar la votación, acabar el veredicto, empezar el siguiente
- * reto de la cola, o dar por empezado otro directo. Devuelve si ha cambiado algo.
+ * reto de la cola, o empezar un día nuevo (pociones a cero). Devuelve si ha cambiado algo.
  */
 export function advance(state: State, config: Config, now: number, random: Random = Math.random): boolean {
   let changed = false
-  if (!state.round && now - state.lastActivity > NEW_STREAM_MS && (state.done.length || state.history.length)) {
+  // Los completados de antes (lista del directo) pasan a quedar marcados en el propio reto.
+  if (state.done.length) {
+    for (const c of config.challenges) if (state.done.includes(c.id)) c.done = true
     state.done = []
-    state.history = []
+    changed = true
+  }
+  // Día nuevo (a las resetHour de España): las pociones vuelven a cero y empieza la lista de «este directo».
+  // Si hay un reto en marcha se espera a que acabe. La primera vez solo se apunta el día, sin borrar nada.
+  const day = streamDay(now, config.resetHour)
+  if (state.day !== day && !state.round) {
+    if (state.day) {
+      if (config.dailyReset) { state.counts = { twitch: 0, youtube: 0, kick: 0 }; state.queue = [] }
+      state.history = []
+    }
+    state.day = day
     changed = true
   }
   for (let guard = 0; guard < 4; guard++) {
@@ -477,8 +505,9 @@ export function applyRedemption(state: State, config: Config, r: RedemptionIn, n
   const text = str(r.text, 120).replace(/\s+/g, ' ')
   const by = str(r.name, 40) || 'Twitch'
   if (!text || config.challenges.length >= CHALLENGES_MAX) return true
-  // Si ya está en la lista (mismo texto), no se repite: solo se vuelve a encender.
+  // Si ya está en la lista (mismo texto), no se repite: solo se vuelve a encender. Si ya se consiguió, no vuelve.
   const same = config.challenges.find(c => c.text.toLowerCase() === text.toLowerCase())
+  if (same?.done) return true
   if (same) same.on = true
   else config.challenges.push({ id: `c${Math.floor(now).toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`, text, diff: config.reward.diff, on: true, by })
   const avatar = typeof r.avatar === 'string' && AVATAR_URL.test(r.avatar) ? r.avatar : undefined
@@ -596,7 +625,6 @@ export function applyPanelOp(state: State, config: Config, op: PanelOp, name: st
       return true
     }
     case 'newStream': {
-      state.done = []
       state.history = []
       state.lastActivity = now
       return true

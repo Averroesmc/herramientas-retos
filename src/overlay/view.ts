@@ -611,7 +611,7 @@ export class View {
       $(stage, '#opts').innerHTML = r.options.map(o => `<div class="opt slot"><div class="bar"></div><span class="n">!</span>
         <span class="t sh">${esc(o.text)}</span><span class="diff d${o.diff}">${DIFFICULTY_NAME[o.diff]}</span><span class="c sh"></span></div>`).join('')
     } else if (!r.options.length) {
-      $(stage, '#ct').textContent = '¡No quedan retos en este directo!'
+      $(stage, '#ct').textContent = '¡No quedan retos!'
       $(stage, '#ch').textContent = 'Añade más retos en el panel'
       $(stage, '#opts').innerHTML = ''
     } else {

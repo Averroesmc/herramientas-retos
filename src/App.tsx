@@ -128,7 +128,7 @@ export default function App() {
               </div>
               <div className="column">
                 <SettingsPanel data={data} patch={patch} ops={ops} />
-                <ChallengesPanel data={data} patch={patch} ops={ops} />
+                <ChallengesPanel data={data} patch={patch} />
               </div>
             </div>
           </div>

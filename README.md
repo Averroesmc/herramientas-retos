@@ -16,7 +16,8 @@
 - **El reto**: salen 3 retos de la lista (los activos que no se han completado en este directo). Según la configuración vota el chat de la plataforma ganadora, votan todos los chats o decide una ruleta. Si hay empate, también decide una ruleta. Luego sale un temporizador (15 minutos por defecto).
 - **Relanzar el último reto**: sin ningún reto en marcha, el panel deja volver a lanzar el último que se jugó con los minutos que se quieran. Sale en el overlay sin celebración ni votación y no gasta ninguna poción. Con un reto en marcha, el tiempo se ajusta con −1 / +1 / +5 min.
 - **Conseguido o fallado**: desde el panel, o desde el chat con `!completado` / `!fallado` (también `!conseguido`, `!superado`, `!fallido`, `!fallida` o `!fallo`; `!hecho` no cuenta, que se usa para otras cosas). Solo cuentan los moderadores y el propio streamer, y solo el primer comando. Se puede activar o desactivar por plataforma.
-- **Retos completados**: no vuelven a salir en el mismo directo. Vuelven con «Nuevo directo» o solos tras 8 horas sin actividad.
+- **Retos completados**: al conseguirlo, el reto queda marcado como completado en la lista y ya no vuelve a salir nunca. Desde la lista se puede devolver uno («Completado · devolver») o todos.
+- **Pociones a cero cada día**: todos los días a las 9:00 de España (la hora se cambia en el panel) todas las pociones vuelven a cero y se vacía la lista de «Este directo». Si hay un reto en marcha, al acabarlo. Se puede desactivar.
 - **Qué cuenta como sub**:
   - Twitch: subs, resubs y regaladas.
   - YouTube: miembros nuevos, aniversarios y regalos de membresía.

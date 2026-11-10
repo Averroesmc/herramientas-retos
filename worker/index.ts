@@ -15,7 +15,7 @@ import { gate } from './gate.ts'
 import { cachedLiveVideo, pollChat, startChat, type ChatSession } from './youtube.ts'
 import {
   advance, applyBallots, applyCommand, applyEvent, applyPanelOp, applyReaders, defaultConfig, initialState,
-  overlayConfig, parseConfig, parseState, sanitizeConfig, viewOf,
+  overlayConfig, parseConfig, parseState, sanitizeConfig, streamDay, viewOf,
   applyRedemption, AVATAR_URL, type BallotIn, type CommandIn, type Config, type FeedEvent, type PanelOp, type RedemptionIn, type State,
 } from '../shared/logic.ts'
 
@@ -174,7 +174,13 @@ async function panel(request: Request, env: Env, pathname: string) {
   }
   if (pathname === '/api/panel/config' && request.method === 'PUT') {
     const body = await request.json<{ config?: unknown }>().catch(() => ({ config: undefined }))
-    const l = await mutate(env.DB, where, l => { l.config = sanitizeConfig(body.config, l.config); return true })
+    const l = await mutate(env.DB, where, (l, now) => {
+      const before = l.config.resetHour
+      l.config = sanitizeConfig(body.config, l.config)
+      // Cambiar la hora de la vuelta a cero no cuenta como día nuevo (no se borran las pociones al momento).
+      if (l.config.resetHour !== before) l.state.day = streamDay(now, l.config.resetHour)
+      return true
+    })
     return json(view(l!))
   }
   if (pathname === '/api/panel/ops' && request.method === 'POST') {

@@ -67,7 +67,7 @@ export function SettingsPanel({ data, patch, ops }: { data: PanelData; patch: Pa
           { value: 'banner', label: 'Banner con corazones' },
         ]} />
         <p className="hint-text">{c.style === 'potions'
-          ? 'Las tres pociones asoman por encima de la cámara, delante la que va ganando. Al llenarse, la poción vuela al centro.'
+          ? 'Las tres pociones asoman por encima de la cámara, delante la de la sub más reciente. Al llenarse, la poción vuela al centro.'
           : 'El overlay queda limpio: con cada sub baja un banner arriba con corazones y vuelve a subir. Al completar una meta, el banner lo celebra.'}</p>
         {c.style === 'potions' && <Switch label="Esconder las pociones sin subs" description="Si pasa un minuto sin ninguna sub, bajan y se meten detrás de la cámara. Con la siguiente sub vuelven a salir." checked={c.autoHide} onChange={v => patch({ autoHide: v })} />}
         <h3 className="group__title">Tipografía</h3>
@@ -93,6 +93,12 @@ export function SettingsPanel({ data, patch, ops }: { data: PanelData; patch: Pa
         ))}
         <Switch label="Contar renovaciones" description="Resubs de Twitch y Kick y aniversarios de miembro de YouTube también llenan la poción." checked={c.countRenewals} onChange={v => patch({ countRenewals: v })} />
         <Switch label="Las perdedoras conservan su progreso" description="Si no, al acabar cada reto todas las pociones vuelven a cero." checked={c.keepProgress} onChange={v => patch({ keepProgress: v })} />
+        <Switch label="Pociones a cero cada día" description={`Todos los días a las ${c.resetHour}:00 (hora de España) todas las pociones vuelven a cero y empieza la lista de «Este directo». Si hay un reto en marcha, al acabarlo.`} checked={c.dailyReset} onChange={v => patch({ dailyReset: v })} />
+        {c.dailyReset && (
+          <div className="fields">
+            <NumberField label="Hora de la vuelta a cero" description="De 0 a 23, hora de España" value={c.resetHour} min={0} max={23} onCommit={v => patch({ resetHour: v })} />
+          </div>
+        )}
       </div>
 
       <div className="group">
@@ -168,9 +174,8 @@ export function SettingsPanel({ data, patch, ops }: { data: PanelData; patch: Pa
 }
 
 /** La lista de retos: se puede añadir, cambiar, apagar y borrar. */
-export function ChallengesPanel({ data, patch, ops }: { data: PanelData; patch: Patch; ops: (...o: PanelOp[]) => Promise<void> }) {
+export function ChallengesPanel({ data, patch }: { data: PanelData; patch: Patch }) {
   const list = data.config.challenges
-  const done = new Set(data.state.done)
   const [text, setText] = useState('')
   const [diff, setDiff] = useState<Difficulty>(2)
   const [confirm, setConfirm] = useState(false)
@@ -187,7 +192,14 @@ export function ChallengesPanel({ data, patch, ops }: { data: PanelData; patch: 
     setConfirm(false)
     set(defaultChallenges())
   }
-  const active = list.filter(c => c.on && !done.has(c.id)).length
+  const active = list.filter(c => c.on && !c.done).length
+  const doneCount = list.filter(c => c.done).length
+  const [confirmBack, setConfirmBack] = useState(false)
+  const allBack = () => {
+    if (!confirmBack) { setConfirmBack(true); setTimeout(() => setConfirmBack(false), 4000); return }
+    setConfirmBack(false)
+    set(list.map(c => (c.done ? { ...c, done: false } : c)))
+  }
 
   return (
     <section className="panel">
@@ -197,7 +209,7 @@ export function ChallengesPanel({ data, patch, ops }: { data: PanelData; patch: 
       </div>
       <ul className="challenges">
         {list.map(c => (
-          <li key={c.id} className={`${c.on ? '' : 'is-off'}${done.has(c.id) ? ' is-done' : ''}`}>
+          <li key={c.id} className={`${c.on ? '' : 'is-off'}${c.done ? ' is-done' : ''}`}>
             <button type="button" role="switch" aria-checked={c.on} className="switch switch--sm" onClick={() => update(c.id, { on: !c.on })} title={c.on ? 'Puede salir' : 'Apagado: no sale'}><span /></button>
             <input className="challenge-text" defaultValue={c.text} maxLength={120} aria-label="Texto del reto"
               onBlur={e => { const v = e.target.value.trim(); if (v && v !== c.text) update(c.id, { text: v }); else e.target.value = c.text }}
@@ -205,8 +217,8 @@ export function ChallengesPanel({ data, patch, ops }: { data: PanelData; patch: 
             <select className={`diff-select d${c.diff}`} value={c.diff} onChange={e => update(c.id, { diff: Number(e.target.value) as Difficulty })} aria-label="Dificultad">
               {([1, 2, 3] as Difficulty[]).map(d => <option key={d} value={d}>{DIFFICULTY_NAME[d]}</option>)}
             </select>
-            {done.has(c.id) && <span className="tag tag--ok">Hecho hoy</span>}
-            {c.by && !done.has(c.id) && <span className="tag tag--by" title={`Lo pidió ${c.by} con puntos del canal`}>{c.by}</span>}
+            {c.done && <button type="button" className="tag tag--ok tag--button" onClick={() => update(c.id, { done: false })} title="Ya se consiguió: no vuelve a salir. Pulsa para devolverlo a la lista.">Completado · devolver</button>}
+            {c.by && !c.done && <span className="tag tag--by" title={`Lo pidió ${c.by} con puntos del canal`}>{c.by}</span>}
             <button type="button" className="icon-button icon-button--sm" onClick={() => set(list.filter(x => x.id !== c.id))} aria-label="Borrar reto" title="Borrar"><Trash2 size={15} /></button>
           </li>
         ))}
@@ -219,7 +231,7 @@ export function ChallengesPanel({ data, patch, ops }: { data: PanelData; patch: 
         <Button size="sm" onClick={add} disabled={!text.trim()}><Plus size={15} /> Añadir</Button>
       </div>
       <div className="row-end">
-        <Button variant="ghost" size="sm" onClick={() => ops({ type: 'newStream' })}>Devolver los completados</Button>
+        {doneCount > 0 && <Button variant="ghost" size="sm" onClick={allBack}>{confirmBack ? `Pulsa otra vez: vuelven ${doneCount}` : `Devolver los completados (${doneCount})`}</Button>}
         <Button variant="ghost" size="sm" onClick={restore}><RotateCcw size={15} /> {confirm ? 'Pulsa otra vez: se borra tu lista' : 'Lista por defecto'}</Button>
       </div>
     </section>
