@@ -498,10 +498,13 @@ export function applyCommand(state: State, config: Config, cmd: CommandIn, now: 
   return true
 }
 
-/** Los comandos de los moderadores: !completado, !conseguido, !fallado, !fallo… sin mirar mayúsculas ni tildes. */
+/**
+ * Los comandos de los moderadores, sin mirar mayúsculas ni tildes: !completado, !conseguido o !superado,
+ * y !fallado, !fallido, !fallida o !fallo. (!hecho no: se usa en el chat para otras cosas.)
+ */
 export function parseCommand(text: string): boolean | null {
   const t = text.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-  if (/^!(completado|conseguido|superado|hecho)\b/.test(t)) return true
+  if (/^!(completado|conseguido|superado)\b/.test(t)) return true
   if (/^!(fallado|fallo|fallida|fallido)\b/.test(t)) return false
   return null
 }
