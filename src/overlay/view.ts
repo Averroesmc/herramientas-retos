@@ -320,7 +320,8 @@ export class View {
     $(this.stage, '#potionsWrap').classList.toggle('hidden', this.banner)
     if (!this.banner) $(this.stage, '#banner').classList.remove('on')
 
-    const active = state.round && !(state.round.result && this.now() > state.round.result.at + 3000) ? state.round.p : null
+    // La poción del reto en marcha se ve llena (menos si es un reto relanzado a mano: esa no se ha llenado).
+    const active = state.round && !state.round.again && !(state.round.result && this.now() > state.round.result.at + 3000) ? state.round.p : null
     for (const p of PLATFORMS) {
       const potion = this.potions[p]
       const on = config.enabled[p]
@@ -602,9 +603,14 @@ export class View {
     const card = $(stage, '#card')
     const col = COLORS[r.p].c
     card.style.setProperty('--c', col)
-    $(stage, '#ck').textContent = `¡GANA ${NAME(r.p)}!`
+    $(stage, '#ck').textContent = r.again ? `RETO · ${NAME(r.p)}` : `¡GANA ${NAME(r.p)}!`
     const mins = Math.round(r.durationMs / 60_000)
-    if (!r.options.length) {
+    if (r.again) {
+      $(stage, '#ct').textContent = '¡Otra vez este reto!'
+      $(stage, '#ch').textContent = `${mins} ${mins === 1 ? 'minuto' : 'minutos'} para conseguirlo`
+      $(stage, '#opts').innerHTML = r.options.map(o => `<div class="opt slot"><div class="bar"></div><span class="n">!</span>
+        <span class="t sh">${esc(o.text)}</span><span class="diff d${o.diff}">${DIFFICULTY_NAME[o.diff]}</span><span class="c sh"></span></div>`).join('')
+    } else if (!r.options.length) {
       $(stage, '#ct').textContent = '¡No quedan retos en este directo!'
       $(stage, '#ch').textContent = 'Añade más retos en el panel'
       $(stage, '#opts').innerHTML = ''
@@ -656,7 +662,7 @@ export class View {
       rows.forEach(row => row.classList.remove('spin'))
     }
     rows.forEach((el, j) => el.classList.add(j === win ? 'win' : 'lose'))
-    $(this.stage, '#ch').textContent = '¡Reto elegido!'
+    if (!r.again) $(this.stage, '#ch').textContent = '¡Reto elegido!'
     if (animate) sfx.chosen()
   }
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, Copy, RefreshCw } from 'lucide-react'
+import { Check, Copy, RefreshCw, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/arc/button/button'
 import { newKey, overlayUrl, type PanelData } from '@/lib/api'
 import { DIFFICULTY_NAME, PLATFORMS, PLATFORM_NAME, phaseOf, type PanelOp, type Platform, type ReaderStatus } from '../../shared/logic'
@@ -131,6 +131,7 @@ export function RoundPanel({ data, skew, ops }: { data: PanelData; skew: number;
         <h2 className="panel__title">Reto en curso</h2>
         <p className="hint-text">Ningún reto en marcha. Cuando una poción llegue a su meta empezará solo: celebración, votación del chat y temporizador.</p>
         {data.state.queue.length > 0 && <p className="hint-text">En cola: {data.state.queue.map(p => PLATFORM_NAME[p]).join(', ')}</p>}
+        <Relaunch data={data} ops={ops} />
       </section>
     )
   }
@@ -172,6 +173,7 @@ export function RoundPanel({ data, skew, ops }: { data: PanelData; skew: number;
           <>
             <Button size="sm" className="btn-ok" onClick={() => ops({ type: 'verdict', ok: true })}>✓ Conseguido</Button>
             <Button size="sm" variant="danger" onClick={() => ops({ type: 'verdict', ok: false })}>✗ Fallado</Button>
+            <Button variant="secondary" size="sm" onClick={() => ops({ type: 'extend', ms: -60_000 })}>−1 min</Button>
             <Button variant="secondary" size="sm" onClick={() => ops({ type: 'extend', ms: 60_000 })}>+1 min</Button>
             <Button variant="secondary" size="sm" onClick={() => ops({ type: 'extend', ms: 5 * 60_000 })}>+5 min</Button>
           </>
@@ -180,6 +182,32 @@ export function RoundPanel({ data, skew, ops }: { data: PanelData; skew: number;
       </div>
       {!r.result && r.decidedAt !== null && <p className="hint-text">También se puede marcar desde el chat: los moderadores (y tú) escribiendo <code>!completado</code> o <code>!fallado</code>.</p>}
     </section>
+  )
+}
+
+/** Relanzar el último reto jugado, con los minutos que se quieran: sin celebración ni votación. */
+function Relaunch({ data, ops }: { data: PanelData; ops: Ops }) {
+  const last = data.state.history[0]
+  const [minutes, setMinutes] = useState(String(data.config.challengeMin))
+  if (!last) return null
+  const n = Math.round(Number(minutes))
+  const ok = Number.isFinite(n) && n >= 1 && n <= 120
+  return (
+    <div className={`relaunch is-${last.p}`}>
+      <div className="relaunch__text">
+        <span className="relaunch__label">Último reto · {PLATFORM_NAME[last.p]} · {last.ok ? 'conseguido' : 'fallado'}</span>
+        <strong>{last.text}</strong>
+      </div>
+      <div className="relaunch__row">
+        <label className="relaunch__minutes">
+          <input type="number" inputMode="numeric" min={1} max={120} value={minutes} onChange={e => setMinutes(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && ok) void ops({ type: 'relaunch', minutes: n }) }} aria-label="Minutos" />
+          <span>min</span>
+        </label>
+        <Button size="sm" disabled={!ok} onClick={() => ops({ type: 'relaunch', minutes: n })}><RotateCcw size={15} /> Relanzar</Button>
+      </div>
+      <p className="hint-text">Vuelve a salir en el overlay con el temporizador de los minutos que pongas, sin votación. No gasta ninguna poción.</p>
+    </div>
   )
 }
 

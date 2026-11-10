@@ -80,6 +80,8 @@ export interface Round {
   playStartsAt: number | null
   durationMs: number
   result: { ok: boolean; by: string | null; at: number } | null
+  /** Un reto relanzado a mano desde el panel: sin celebración ni votación, y no gasta ninguna poción. */
+  again?: boolean
 }
 
 export interface HistoryItem { id: string; text: string; p: Platform; ok: boolean; by: string | null; at: number }
@@ -365,8 +367,11 @@ function finishRound(state: State, config: Config, round: Round) {
     state.history = state.history.slice(0, HISTORY_MAX)
   }
   // La ganadora se vacía (lo que pasó de la meta se queda); las demás, según la configuración.
-  state.counts[round.p] = Math.max(0, state.counts[round.p] - config.goals[round.p])
-  if (!config.keepProgress) for (const p of PLATFORMS) if (p !== round.p && !state.queue.includes(p)) state.counts[p] = 0
+  // Un reto relanzado a mano no ha llenado ninguna poción: no se toca nada.
+  if (!round.again) {
+    state.counts[round.p] = Math.max(0, state.counts[round.p] - config.goals[round.p])
+    if (!config.keepProgress) for (const p of PLATFORMS) if (p !== round.p && !state.queue.includes(p)) state.counts[p] = 0
+  }
   state.round = null
 }
 
@@ -520,6 +525,7 @@ export type PanelOp =
   | { type: 'newStream' }
   | { type: 'resetCounts' }
   | { type: 'learnReward'; on: boolean }
+  | { type: 'relaunch'; minutes: number }
 
 export function applyPanelOp(state: State, config: Config, op: PanelOp, name: string, now: number, random: Random = Math.random): boolean {
   const round = state.round
@@ -558,8 +564,32 @@ export function applyPanelOp(state: State, config: Config, op: PanelOp, name: st
     }
     case 'cancel': {
       if (!round) return false
-      state.counts[round.p] = Math.max(0, state.counts[round.p] - config.goals[round.p])
+      if (!round.again) state.counts[round.p] = Math.max(0, state.counts[round.p] - config.goals[round.p])
       state.round = null
+      return true
+    }
+    case 'relaunch': {
+      // El último reto jugado, otra vez y con los minutos que se digan: se salta la celebración y la votación.
+      const last = state.history[0]
+      if (round || !last) return false
+      const diff = config.challenges.find(c => c.id === last.id)?.diff ?? 2
+      state.round = {
+        id: rid(random),
+        p: last.p,
+        mode: 'roulette',
+        startedAt: now - INTRO_MS,
+        options: [{ id: last.id, text: last.text, diff }],
+        voteEndsAt: now,
+        ballots: {},
+        winner: 0,
+        tied: [],
+        decidedAt: now,
+        playStartsAt: now + REVEAL_MS,
+        durationMs: clamp(op.minutes, 1, 120, config.challengeMin) * 60_000,
+        result: null,
+        again: true,
+      }
+      state.lastActivity = now
       return true
     }
     case 'newStream': {
